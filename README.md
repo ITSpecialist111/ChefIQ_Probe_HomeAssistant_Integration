@@ -7,6 +7,7 @@ A native Home Assistant integration for the **Chef iQ CQ60 Smart Wireless Meat T
 * **Sentinel‑aware.** When a probe ring isn't in contact with anything (only the tip is inserted, ambient is exposed, etc.) the firmware emits a "not‑measured" value of `0x7FFB`. This integration masks those to **unavailable** instead of letting `3,276 °C` end up on your graphs.
 * **Battery is properly scaled.** Raw 0–255 byte → 0–100 %.
 * **Per‑probe config entries.** Each physical probe gets its own device card with all six rings, battery and signal as separate entities — auto‑discovered the moment HA sees a Chef iQ advert.
+* **Multi‑probe ready.** Built for the 4‑probe Chef iQ set out of the box — wake each probe in turn, accept its discovery card, and you'll have one independent device + entity bundle per physical probe. See [Multiple probes](#multiple-probes) below.
 
 ## Sensors per probe
 
@@ -45,11 +46,23 @@ BLE Monitor is brilliant, but its bundled Chef iQ parser:
 This integration is an end run around all three of those — it sits directly on `homeassistant.components.bluetooth`, so any source that integration sees, this one sees too.
 
 (There is a [companion PR open against BLE Monitor](https://github.com/custom-components/ble_monitor/pull/1538) that fixes the sentinel issue there too, for users who prefer to stay on BLE Monitor.)
+Multiple probes
+
+The integration is **per‑probe by design** — each physical CQ60 you pair becomes its own config entry, its own HA device, and its own bundle of `meat / probe_tip / probe_1 / probe_2 / probe_3 / ambient / battery / signal` entities. There's no hard‑coded limit; the 4‑probe Chef iQ set works out of the box, and so does any number beyond that as long as your Bluetooth source(s) can hear all of them.
+
+**To pair multiple probes:**
+
+1. Wake **probe 1** (touch the dock button), accept its discovery card.
+2. Wake **probe 2**, accept its discovery card. Repeat for 3, 4, …
+3. **Rename each device** straight away under *Settings → Devices & Services → Chef iQ BLE → \<device\> → pencil icon* to something meaningful (`Brisket`, `Chicken`, `Pork`, `Ambient`, …). Entity IDs follow the device name, so renaming gives you readable IDs like `sensor.brisket_meat_temperature` instead of the default `sensor.chef_iq_cq60_2_meat_temperature`.
+
+Each probe broadcasts independently, so signal loss / battery / firmware sentinel handling is fully isolated — one probe going *unavailable* never affects the others.
 
 ## Example dashboard / automation
 
-A ready‑made Lovelace dashboard with a "doneness" gauge, ring chart and cook‑state banner is published as a separate Python script in the [HASS MCP repo](https://github.com/ITSpecialist111/HASS-MCP) — point it at your HA URL + LLT and it republishes the dashboard idempotently.
-
+* **Single probe (minimal):** [`examples/dashboard.yaml`](examples/dashboard.yaml).
+* **Four probes (Chef iQ 4‑probe set):** [`examples/dashboard_multi_probe.yaml`](examples/dashboard_multi_probe.yaml) — sections layout with one card group per probe plus a combined 2‑hour trend graph, and a Jinja snippet for a "hottest probe" template sensor.
+* **Full "wow factor" dashboard:** the doneness gauge / ring chart / cook‑state banner version is published as a Python generator in the [HASS MCP repo](https://github.com/ITSpecialist111/HASS-MCP) — point it at your HA URL + LLT and it republishes the dashboard idempotently
 A minimal example is included in [`examples/dashboard.yaml`](examples/dashboard.yaml).
 
 ## Compatibility

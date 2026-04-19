@@ -1,0 +1,164 @@
+# Multi-probe Lovelace dashboard for Chef iQ BLE.
+#
+# This example assumes you have **four** CQ60 probes paired (e.g. the
+# 4-probe Chef iQ set). Each probe was discovered as a separate device
+# and config entry, and HA's auto-generated device names suffix duplicates
+# with `_2`, `_3`, `_4`. So your default entity IDs will be:
+#
+#   sensor.chef_iq_cq60_*               <- first probe added
+#   sensor.chef_iq_cq60_2_*             <- second probe added
+#   sensor.chef_iq_cq60_3_*
+#   sensor.chef_iq_cq60_4_*
+#
+# >>> STRONG RECOMMENDATION <<<
+# Rename each device to whatever you'll cook with it ("Brisket",
+# "Chicken", "Pork", "Ambient") via Settings -> Devices & Services ->
+# Chef iQ BLE -> click each device -> pencil icon. The entity IDs follow
+# the device name, so you'll end up with:
+#
+#   sensor.brisket_meat_temperature
+#   sensor.chicken_meat_temperature
+#   ...
+#
+# That makes dashboards / automations vastly more readable. The example
+# below uses the default `_2`, `_3`, `_4` naming so it works out of the
+# box; just find/replace once you've renamed your devices.
+#
+# Drop into Settings -> Dashboards -> + Add Dashboard -> Edit -> the
+# three-dot menu -> Raw Configuration Editor.
+
+title: Chef iQ — All Probes
+views:
+  - title: Overview
+    icon: mdi:food-steak
+    type: sections
+    max_columns: 4
+    sections:
+      # ---------- Probe 1 ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: "Probe 1"
+            heading_style: title
+            icon: mdi:food-steak
+          - type: gauge
+            entity: sensor.chef_iq_cq60_meat_temperature
+            name: Meat
+            min: 0
+            max: 100
+            severity: { green: 60, yellow: 50, red: 75 }
+          - type: glance
+            entities:
+              - entity: sensor.chef_iq_cq60_ambient_temperature
+                name: Ambient
+              - entity: sensor.chef_iq_cq60_battery
+                name: Battery
+              - entity: sensor.chef_iq_cq60_probe_tip
+                name: Tip
+
+      # ---------- Probe 2 ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: "Probe 2"
+            heading_style: title
+            icon: mdi:food-drumstick
+          - type: gauge
+            entity: sensor.chef_iq_cq60_2_meat_temperature
+            name: Meat
+            min: 0
+            max: 100
+            severity: { green: 74, yellow: 65, red: 80 }
+          - type: glance
+            entities:
+              - entity: sensor.chef_iq_cq60_2_ambient_temperature
+                name: Ambient
+              - entity: sensor.chef_iq_cq60_2_battery
+                name: Battery
+              - entity: sensor.chef_iq_cq60_2_probe_tip
+                name: Tip
+
+      # ---------- Probe 3 ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: "Probe 3"
+            heading_style: title
+            icon: mdi:food-variant
+          - type: gauge
+            entity: sensor.chef_iq_cq60_3_meat_temperature
+            name: Meat
+            min: 0
+            max: 100
+            severity: { green: 60, yellow: 50, red: 75 }
+          - type: glance
+            entities:
+              - entity: sensor.chef_iq_cq60_3_ambient_temperature
+                name: Ambient
+              - entity: sensor.chef_iq_cq60_3_battery
+                name: Battery
+              - entity: sensor.chef_iq_cq60_3_probe_tip
+                name: Tip
+
+      # ---------- Probe 4 ----------
+      - type: grid
+        cards:
+          - type: heading
+            heading: "Probe 4"
+            heading_style: title
+            icon: mdi:fish
+          - type: gauge
+            entity: sensor.chef_iq_cq60_4_meat_temperature
+            name: Meat
+            min: 0
+            max: 100
+            severity: { green: 55, yellow: 45, red: 65 }
+          - type: glance
+            entities:
+              - entity: sensor.chef_iq_cq60_4_ambient_temperature
+                name: Ambient
+              - entity: sensor.chef_iq_cq60_4_battery
+                name: Battery
+              - entity: sensor.chef_iq_cq60_4_probe_tip
+                name: Tip
+
+      # ---------- Combined trend ----------
+      - type: grid
+        column_span: 4
+        cards:
+          - type: heading
+            heading: "All probes — last 2 hours"
+            heading_style: title
+            icon: mdi:chart-line
+          - type: history-graph
+            hours_to_show: 2
+            entities:
+              - sensor.chef_iq_cq60_meat_temperature
+              - sensor.chef_iq_cq60_2_meat_temperature
+              - sensor.chef_iq_cq60_3_meat_temperature
+              - sensor.chef_iq_cq60_4_meat_temperature
+              - sensor.chef_iq_cq60_ambient_temperature
+              - sensor.chef_iq_cq60_2_ambient_temperature
+              - sensor.chef_iq_cq60_3_ambient_temperature
+              - sensor.chef_iq_cq60_4_ambient_temperature
+
+# ============================================================
+# Optional helper: a "hottest probe" template sensor for
+# multi-probe cooks. Drop into your `configuration.yaml` (under
+# `template:` -> `- sensor:`) and reload templates:
+#
+# template:
+#   - sensor:
+#       - name: "Chef iQ hottest meat"
+#         unit_of_measurement: "°C"
+#         device_class: temperature
+#         state_class: measurement
+#         state: >
+#           {% set probes = [
+#             states('sensor.chef_iq_cq60_meat_temperature'),
+#             states('sensor.chef_iq_cq60_2_meat_temperature'),
+#             states('sensor.chef_iq_cq60_3_meat_temperature'),
+#             states('sensor.chef_iq_cq60_4_meat_temperature')
+#           ] | reject('in', ['unknown', 'unavailable', 'none']) | map('float', 0) | list %}
+#           {{ probes | max if probes else 'unavailable' }}
+# ============================================================
