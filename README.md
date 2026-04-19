@@ -9,6 +9,14 @@ A native Home Assistant integration for the **Chef iQ CQ60 Smart Wireless Meat T
 * **Per‑probe config entries.** Each physical probe gets its own device card with all six rings, battery and signal as separate entities — auto‑discovered the moment HA sees a Chef iQ advert.
 * **Multi‑probe ready.** Built for the 4‑probe Chef iQ set out of the box — wake each probe in turn, accept its discovery card, and you'll have one independent device + entity bundle per physical probe. See [Multiple probes](#multiple-probes) below.
 
+## Quick links
+
+* 📊 **Single‑probe dashboard:** [`examples/dashboard.yaml`](examples/dashboard.yaml)
+* 📊 **Four‑probe dashboard:** [`examples/dashboard_multi_probe.yaml`](examples/dashboard_multi_probe.yaml)
+* 🛠️ **Install:** [HACS — recommended](#install-hacs--recommended) · [Manual](#install-manual)
+* 🍗 **Multi‑probe setup guide:** [Multiple probes](#multiple-probes)
+* 🐛 **Issues / feature requests:** [GitHub issues](https://github.com/ITSpecialist111/ChefIQ_Probe_HomeAssistant_Integration/issues)
+
 ## Sensors per probe
 
 | Entity | Description |
@@ -46,7 +54,8 @@ BLE Monitor is brilliant, but its bundled Chef iQ parser:
 This integration is an end run around all three of those — it sits directly on `homeassistant.components.bluetooth`, so any source that integration sees, this one sees too.
 
 (There is a [companion PR open against BLE Monitor](https://github.com/custom-components/ble_monitor/pull/1538) that fixes the sentinel issue there too, for users who prefer to stay on BLE Monitor.)
-Multiple probes
+
+## Multiple probes
 
 The integration is **per‑probe by design** — each physical CQ60 you pair becomes its own config entry, its own HA device, and its own bundle of `meat / probe_tip / probe_1 / probe_2 / probe_3 / ambient / battery / signal` entities. There's no hard‑coded limit; the 4‑probe Chef iQ set works out of the box, and so does any number beyond that as long as your Bluetooth source(s) can hear all of them.
 
@@ -58,12 +67,20 @@ The integration is **per‑probe by design** — each physical CQ60 you pair bec
 
 Each probe broadcasts independently, so signal loss / battery / firmware sentinel handling is fully isolated — one probe going *unavailable* never affects the others.
 
-## Example dashboard / automation
+## Dashboards
 
-* **Single probe (minimal):** [`examples/dashboard.yaml`](examples/dashboard.yaml).
-* **Four probes (Chef iQ 4‑probe set):** [`examples/dashboard_multi_probe.yaml`](examples/dashboard_multi_probe.yaml) — sections layout with one card group per probe plus a combined 2‑hour trend graph, and a Jinja snippet for a "hottest probe" template sensor.
-* **Full "wow factor" dashboard:** the doneness gauge / ring chart / cook‑state banner version is published as a Python generator in the [HASS MCP repo](https://github.com/ITSpecialist111/HASS-MCP) — point it at your HA URL + LLT and it republishes the dashboard idempotently
-A minimal example is included in [`examples/dashboard.yaml`](examples/dashboard.yaml).
+Two ready‑to‑paste Lovelace dashboards live in [`examples/`](examples/). Both are pure YAML — open *Settings → Dashboards → + Add Dashboard → Edit → ⋮ → Raw Configuration Editor* and paste the contents of whichever file matches your setup.
+
+| File | When to use it |
+|---|---|
+| [`examples/dashboard.yaml`](examples/dashboard.yaml) | **One probe.** Gauge + entity list + 1‑hour history graph. The simplest possible starting point. |
+| [`examples/dashboard_multi_probe.yaml`](examples/dashboard_multi_probe.yaml) | **Two or more probes** (built around the Chef iQ 4‑probe set). Sections layout with one card group per probe (gauge + ambient + battery + tip), a combined 2‑hour `history-graph` across all probes, and a commented Jinja snippet for a "hottest probe" template sensor. |
+
+Both examples assume the default auto‑generated entity IDs (`sensor.chef_iq_cq60_*`, `sensor.chef_iq_cq60_2_*`, …). If you've renamed your devices to something more descriptive (highly recommended — see [Multiple probes](#multiple-probes)), do a find/replace on the entity prefix once and you're done.
+
+### Full "wow factor" dashboard
+
+The richer dashboard with a doneness gauge, ring chart, cook‑state banner, target‑temp slider, preset picker and live trend (the one in the project screenshot) is published as a Python generator in the [HASS MCP repo](https://github.com/ITSpecialist111/HASS-MCP) — point it at your HA URL + Long‑Lived Access Token and it republishes the dashboard idempotently. It also creates the supporting helpers (`input_number.chefiq_target`, etc.) and a doneness template sensor.
 
 ## Compatibility
 
