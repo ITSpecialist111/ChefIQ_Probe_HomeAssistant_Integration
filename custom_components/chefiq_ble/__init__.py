@@ -97,14 +97,9 @@ def parse_chefiq_payload(payload: bytes) -> dict[str, Any] | None:
     }
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Top-level setup — nothing to do; everything happens per config-entry."""
-    hass.data.setdefault(DOMAIN, {})
-    return True
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a single Chef iQ CQ60 probe (one config entry per probe)."""
+    hass.data.setdefault(DOMAIN, {})
     address: str = entry.unique_id  # uppercased BD address from discovery
     addr_slug = address.replace(":", "").lower()
 

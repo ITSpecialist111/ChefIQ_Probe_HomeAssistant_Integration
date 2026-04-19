@@ -1,16 +1,16 @@
 {
     "domain": "chefiq_ble",
     "name": "Chef iQ BLE",
-    "version": "1.0.0",
-    "documentation": "https://github.com/ITSpecialist111/ChefIQ_Probe_HomeAssistant_Integration",
-    "issue_tracker": "https://github.com/ITSpecialist111/ChefIQ_Probe_HomeAssistant_Integration/issues",
-    "dependencies": ["bluetooth"],
-    "codeowners": ["@ITSpecialist111"],
-    "requirements": [],
-    "iot_class": "local_push",
-    "config_flow": true,
-    "integration_type": "device",
     "bluetooth": [
         {"manufacturer_id": 1485}
-    ]
+    ],
+    "codeowners": ["@ITSpecialist111"],
+    "config_flow": true,
+    "dependencies": ["bluetooth"],
+    "documentation": "https://github.com/ITSpecialist111/ChefIQ_Probe_HomeAssistant_Integration",
+    "integration_type": "device",
+    "iot_class": "local_push",
+    "issue_tracker": "https://github.com/ITSpecialist111/ChefIQ_Probe_HomeAssistant_Integration/issues",
+    "requirements": [],
+    "version": "1.0.1"
 }
