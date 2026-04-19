@@ -1,0 +1,43 @@
+# Minimal example dashboard for Chef iQ BLE.
+#
+# Drop this into a new dashboard via Settings → Dashboards → + Add Dashboard
+# → Edit Dashboard → ⋮ → Raw Configuration Editor and adjust the entity IDs
+# at the bottom if you have more than one probe.
+
+title: Chef iQ
+views:
+  - title: Probe
+    icon: mdi:food-steak
+    cards:
+      - type: heading
+        heading: Chef iQ CQ60
+        heading_style: title
+        icon: mdi:food-steak
+
+      - type: gauge
+        entity: sensor.chef_iq_cq60_meat_temperature
+        name: Meat
+        min: 0
+        max: 100
+        severity:
+          green: 60
+          yellow: 50
+          red: 75
+
+      - type: entities
+        title: All rings
+        entities:
+          - sensor.chef_iq_cq60_meat_temperature
+          - sensor.chef_iq_cq60_probe_tip
+          - sensor.chef_iq_cq60_probe_ring_1
+          - sensor.chef_iq_cq60_probe_ring_2
+          - sensor.chef_iq_cq60_probe_ring_3
+          - sensor.chef_iq_cq60_ambient_temperature
+          - sensor.chef_iq_cq60_battery
+
+      - type: history-graph
+        title: Last hour
+        hours_to_show: 1
+        entities:
+          - sensor.chef_iq_cq60_meat_temperature
+          - sensor.chef_iq_cq60_ambient_temperature

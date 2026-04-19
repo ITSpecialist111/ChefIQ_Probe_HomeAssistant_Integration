@@ -1,0 +1,34 @@
+{
+    "config": {
+        "flow_title": "{name} ({address})",
+        "step": {
+            "bluetooth_confirm": {
+                "title": "Set up Chef iQ probe",
+                "description": "Add **{name}** (`{address}`) to Home Assistant?"
+            },
+            "user": {
+                "title": "Set up Chef iQ probe",
+                "description": "Choose the Chef iQ probe to add.",
+                "data": {
+                    "address": "Bluetooth device"
+                }
+            }
+        },
+        "abort": {
+            "no_devices_found": "No Chef iQ probes were found nearby. Wake the probe (touch the button) and ensure at least one Bluetooth source — local USB, ESPHome BT proxy, SLZB-06, etc. — is in range, then try again.",
+            "already_configured": "This Chef iQ probe is already configured."
+        }
+    },
+    "entity": {
+        "sensor": {
+            "meat_temperature": { "name": "Meat temperature" },
+            "probe_tip_temperature": { "name": "Probe tip" },
+            "probe_1_temperature": { "name": "Probe ring 1" },
+            "probe_2_temperature": { "name": "Probe ring 2" },
+            "probe_3_temperature": { "name": "Probe ring 3" },
+            "ambient_temperature": { "name": "Ambient temperature" },
+            "battery": { "name": "Battery" },
+            "rssi": { "name": "Signal strength" }
+        }
+    }
+}
