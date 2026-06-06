@@ -50,51 +50,53 @@ def parse_chefiq_payload(payload: bytes) -> dict[str, Any] | None:
     """Decode a Chef iQ CQ60 manufacturer payload (the bytes that follow
     the manufacturer-ID prefix).
 
-    Layout (18 bytes, all little-endian):
+    The CQ60 broadcasts three record types, distinguished by byte ``[0]``:
 
-    ``[0]``    record-type (``0x01`` = temperature, ``0x03`` = identity,
-               ``0x00`` = name)
-    ``[1]``    sub-type / sequence
-    ``[2]``    battery (raw 0-255 → scaled to 0-100 %)
-    ``[3]``    probe-ring 3 (8-bit °C, integer)
-    ``[4-5]``  reserved
-    ``[6-7]``  meat (tip-most ring) °C × 10
-    ``[8-9]``  probe tip °C × 10
-    ``[10-11]`` probe ring 1 °C × 10
-    ``[12-13]`` probe ring 2 °C × 10
-    ``[14-15]`` ambient (handle-end) °C × 10
-    ``[16-17]`` checksum / sequence
+    * ``0x01`` temperature (18 bytes) — byte ``[1]`` is a flags/sequence
+      field, followed by seven little-endian ``uint16`` temperature slots
+      (°C × 10) spanning bytes ``[2:16]``, then a 2-byte checksum. Slot 0
+      mirrors the ambient slot (slot 6); the firmware emits ``0x7FFB`` /
+      ``0x7FFE`` / ``0x7FFF`` for any ring that is not currently reading.
 
-    Returns ``None`` for any non-temperature record so callers can ignore
-    them silently.
+          slot 0  ([2:4])    ambient mirror (ignored — same as slot 6)
+          slot 1  ([4:6])    probe ring 3
+          slot 2  ([6:8])    meat (tip-most ring)
+          slot 3  ([8:10])   probe tip
+          slot 4  ([10:12])  probe ring 1
+          slot 5  ([12:14])  probe ring 2
+          slot 6  ([14:16])  ambient (handle-end)
+
+    * ``0x03`` identity (17 bytes) — bytes ``[2:8]`` are the BD address and
+      byte ``[8]`` is the battery percentage (0-100, already scaled by the
+      firmware).
+    * ``0x00`` name (16 bytes) — ignored.
+
+    Returns a *partial* dict for temperature and identity records (callers
+    merge them into a single per-device store), or ``None`` for any record
+    we do not decode.
     """
-    if len(payload) != 18 or payload[0] != 0x01:
-        return None
-    try:
-        msg = payload[2:]
-        (
-            batt,
-            t_probe_3,
-            _reserved,
-            t_meat,
-            t_tip,
-            t_p1,
-            t_p2,
-            t_amb,
-            _last,
-        ) = unpack("<BBHHHHHHh", msg)
-    except Exception:  # noqa: BLE001
+    if not payload:
         return None
 
-    return {
-        "battery": max(0, min(100, round(batt * 100 / 255))),
-        "meat_temperature": _decode_temp(t_meat),
-        "probe_tip_temperature": _decode_temp(t_tip),
-        "probe_1_temperature": _decode_temp(t_p1),
-        "probe_2_temperature": _decode_temp(t_p2),
-        "probe_3_temperature": float(t_probe_3) if t_probe_3 < 0xFE else None,
-        "ambient_temperature": _decode_temp(t_amb),
-    }
+    if payload[0] == 0x01 and len(payload) == 18:
+        try:
+            slots = unpack("<7H", payload[2:16])
+        except Exception:  # noqa: BLE001
+            return None
+        return {
+            "meat_temperature": _decode_temp(slots[2]),
+            "probe_tip_temperature": _decode_temp(slots[3]),
+            "probe_1_temperature": _decode_temp(slots[4]),
+            "probe_2_temperature": _decode_temp(slots[5]),
+            "probe_3_temperature": _decode_temp(slots[1]),
+            "ambient_temperature": _decode_temp(slots[6]),
+        }
+
+    if payload[0] == 0x03 and len(payload) >= 9:
+        # Identity record: battery percentage sits just after the address.
+        return {"battery": max(0, min(100, payload[8]))}
+
+    return None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
