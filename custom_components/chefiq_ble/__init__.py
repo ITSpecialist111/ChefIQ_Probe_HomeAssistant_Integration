@@ -22,7 +22,7 @@ from homeassistant.components.bluetooth import (
 )
 from homeassistant.components.bluetooth.match import BluetoothCallbackMatcher
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.const import CONF_ADDRESS, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -100,7 +100,7 @@ def parse_chefiq_payload(payload: bytes) -> dict[str, Any] | None:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a single Chef iQ CQ60 probe (one config entry per probe)."""
     hass.data.setdefault(DOMAIN, {})
-    address: str = entry.unique_id  # uppercased BD address from discovery
+    address: str = entry.data[CONF_ADDRESS]  # uppercased BD address from discovery
     addr_slug = address.replace(":", "").lower()
 
     store = hass.data[DOMAIN].setdefault(
@@ -129,22 +129,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_dispatcher_send(hass, SIGNAL_NEW, addr_slug)
         _LOGGER.debug("Chef iQ %s: %s", service_info.address, data)
 
-    cancel = async_register_callback(
-        hass,
-        _on_advert,
-        BluetoothCallbackMatcher(
-            manufacturer_id=MFR_ID,
-            address=address,
-        ),
-        BluetoothScanningMode.PASSIVE,
+    # ``connectable=False`` ensures we still match the probe when the only
+    # Bluetooth source is an advert-only / passive scanner (ESPHome BT
+    # proxy, SLZB-06, Shelly gateway) that cannot make active connections.
+    entry.async_on_unload(
+        async_register_callback(
+            hass,
+            _on_advert,
+            BluetoothCallbackMatcher(
+                manufacturer_id=MFR_ID,
+                address=address,
+                connectable=False,
+            ),
+            BluetoothScanningMode.PASSIVE,
+        )
     )
-
-    @callback
-    def _on_stop(_event):
-        cancel()
-
-    entry.async_on_unload(cancel)
-    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -154,6 +153,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        addr_slug = entry.unique_id.replace(":", "").lower()
+        addr_slug = entry.data[CONF_ADDRESS].replace(":", "").lower()
         hass.data[DOMAIN].pop(addr_slug, None)
     return unloaded

@@ -2,7 +2,7 @@
     "domain": "chefiq_ble",
     "name": "Chef iQ BLE",
     "bluetooth": [
-        {"manufacturer_id": 1485}
+        {"manufacturer_id": 1485, "connectable": false}
     ],
     "codeowners": ["@ITSpecialist111"],
     "config_flow": true,
@@ -12,5 +12,5 @@
     "iot_class": "local_push",
     "issue_tracker": "https://github.com/ITSpecialist111/ChefIQ_Probe_HomeAssistant_Integration/issues",
     "requirements": [],
-    "version": "1.0.1"
+    "version": "1.1.0"
 }

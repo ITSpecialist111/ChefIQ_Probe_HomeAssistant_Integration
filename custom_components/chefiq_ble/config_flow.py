@@ -21,7 +21,6 @@ from homeassistant.components.bluetooth import (
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_ADDRESS
 
-from . import parse_chefiq_payload
 from .const import DOMAIN, MFR_ID
 
 
@@ -42,16 +41,6 @@ class ChefIQConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle Bluetooth discovery."""
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
-
-        # Only accept if the manufacturer payload actually decodes — keeps
-        # us from showing discovery cards for non-CQ60 Chef iQ products.
-        mfr = discovery_info.manufacturer_data.get(MFR_ID)
-        if not mfr or parse_chefiq_payload(mfr) is None:
-            # Identity / name records appear before the first temperature
-            # record. Allow discovery anyway so we don't miss the device,
-            # but only proceed once we've seen a valid temp record OR the
-            # user confirms.
-            pass
 
         self._discovered_address = discovery_info.address
         self._discovered_name = discovery_info.name or "Chef iQ CQ60"
