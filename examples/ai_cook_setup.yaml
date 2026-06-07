@@ -241,7 +241,7 @@ automation:
                     state: "on"
                 then:
                   - action: script.chefiq_kitchen_announce
-                    data: { message: "{{ plan_txt }}", volume: 38 }
+                    data: { message: "{{ plan_txt }}" }
         default:
           - action: input_text.set_value
             target: { entity_id: input_text.chef_iq_cook_plan }
@@ -276,7 +276,7 @@ automation:
             state: "on"
         then:
           - action: script.chefiq_kitchen_announce
-            data: { message: "Cook session ended.", volume: 34 }
+            data: { message: "Cook session ended." }
 
   # ── 3) Auto-end the session (cooldown / offline / settled-idle) ────────────
   #    Stops the timer (and therefore the AI coach) so you never burn tokens on

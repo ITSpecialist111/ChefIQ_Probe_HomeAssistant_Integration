@@ -24,6 +24,16 @@
 #   • `continue_on_error` on snapshot/restore so a Sonos hiccup can never abort
 #     the script before the volume is put back and the flag is cleared.
 #
+# RELATIVE LOUDNESS: instead of a fixed announce volume, it speaks at
+#   target = clamp( max(current_music + boost, volume_floor, 15), cap )
+# so it ducks proportionally to whatever the music is doing:
+#   • music 0.30 + boost 8  → announce 0.38
+#   • music 0.55 + boost 8  → announce 0.63
+# `volume` is an optional MINIMUM floor (0 = fully relative) so urgent alerts
+# (danger zone, low battery) can guarantee a loud floor even over quiet music,
+# while informational announcements (coach/setup/end) pass nothing and stay
+# gentle/relative.
+#
 # Change the entity_ids to yours:
 #   media_player.sonos     → your Sonos speaker
 #   tts.openai_tts_nova    → your TTS engine entity
@@ -59,15 +69,28 @@ script:
         selector:
           text:
       volume:
-        description: Announce volume 0-100
-        default: 40
+        description: Minimum announce level 0-100 (0 = fully relative to music). A floor for urgent alerts.
+        default: 0
         selector:
-          number: { min: 0, max: 100, step: 5 }
+          number: { min: 0, max: 100, step: 1 }
+      boost:
+        description: How many points ABOVE the current music level to speak
+        default: 8
+        selector:
+          number: { min: 0, max: 50, step: 1 }
+      cap:
+        description: Maximum announce level 0-100
+        default: 80
+        selector:
+          number: { min: 10, max: 100, step: 1 }
     sequence:
       - variables:
           spk: media_player.sonos
           was_playing: "{{ is_state('media_player.sonos','playing') }}"
           cur_vol: "{{ state_attr('media_player.sonos','volume_level') | float(0.3) }}"
+          min_level: "{{ volume | default(0) | float }}"
+          boost: "{{ boost | default(8) | float }}"
+          cap: "{{ cap | default(80) | float }}"
           # ~2 words/sec speech estimate, so we wait long enough but not forever.
           speak_secs: "{{ [3 + (((message | default('')) | string).split() | length) / 2.0, 30] | min }}"
 
@@ -87,10 +110,18 @@ script:
             continue_on_error: true
             data: { entity_id: media_player.sonos, with_group: true }
 
-      # Duck the music UP to the announce volume and speak.
+      # Compute the announce level RELATIVE to the captured music volume.
+      # (Two separate variables steps: base100 must be defined before target_vol
+      #  references it — siblings in one block aren't guaranteed to resolve.)
+      - variables:
+          base100: "{{ states('input_number.chef_iq_sonos_prev_volume') | float(0.3) * 100 }}"
+      - variables:
+          target_vol: "{{ ([[ base100 + boost, min_level, 15 ] | max, cap] | min) / 100 }}"
+
+      # Duck to the (relative) announce volume and speak.
       - action: media_player.volume_set
         target: { entity_id: media_player.sonos }
-        data: { volume_level: "{{ (volume | default(40) | float) / 100 }}" }
+        data: { volume_level: "{{ target_vol }}" }
       - action: tts.speak
         target: { entity_id: tts.openai_tts_nova }
         data:

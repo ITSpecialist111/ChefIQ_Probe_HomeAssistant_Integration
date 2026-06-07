@@ -125,10 +125,11 @@ automation:
             entity_id: input_boolean.chef_iq_ai_announce
             state: "on"
         then:
+          # No volume: the announce script speaks relative to the current music
+          # level (music + boost), so it ducks proportionally. See kitchen_announce.yaml.
           - action: script.chefiq_kitchen_announce
             data:
               message: "{{ insight }}"
-              volume: 38
 
 # =============================================================================
 # ALTERNATIVE — use an external LLM provider (e.g. Mistral) via rest_command
