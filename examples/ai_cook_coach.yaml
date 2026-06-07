@@ -1,0 +1,118 @@
+# =============================================================================
+# Chef iQ — AI Cook Coach (Mistral, 5-minute poll)
+# =============================================================================
+# Every 5 minutes during a cook, sends the live sensor + derived-intelligence
+# state to an LLM (Mistral) and gets back ONE short, expert, natural-language
+# insight ("safe and done — pull it now to rest; juiciness dropping"). The
+# insight is stored in input_text.chef_iq_ai_coach and shown on the dashboard;
+# optionally announced on the kitchen Sonos.
+#
+# WHY AN LLM ON TOP OF THE SENSORS? The template sensors already compute the
+# facts (pasteurization %, juiciness, carryover, phase). The LLM turns those
+# facts into a single prioritised, human judgement call — the bit that's hard
+# to express in Jinja.
+#
+# COST: ~330 tokens/poll on mistral-medium — fractions of a penny per cook.
+#
+# ── SETUP (2 steps, via Studio Code Server / File editor) ───────────────────
+# 1. Add your key to  /config/secrets.yaml  (NEVER commit this):
+#       chefiq_mistral_bearer: "Bearer YOUR_MISTRAL_API_KEY_HERE"
+# 2. Add the rest_command below to  /config/configuration.yaml , then restart.
+#
+# The input_text/input_datetime/input_boolean helpers and the polling
+# automation can be created in the UI (Settings → Devices & Services → Helpers
+# and the Automation editor) — see the automation at the bottom.
+# =============================================================================
+
+rest_command:
+  chefiq_ai_coach:
+    url: https://api.mistral.ai/v1/chat/completions
+    method: POST
+    timeout: 30
+    headers:
+      authorization: !secret chefiq_mistral_bearer
+      content-type: application/json
+    # The cook context is assembled from the sensors and safely JSON-escaped
+    # with | to_json. Edit the entity names if yours differ.
+    payload: >-
+      {
+        "model": "mistral-medium-latest",
+        "temperature": 0.4,
+        "max_tokens": 120,
+        "messages": [
+          {"role": "system", "content": "You are a concise expert cooking assistant monitoring a smart meat probe. Give ONE short, friendly, actionable insight (max 2 sentences). Be specific about food safety and doneness, use the data, never invent numbers. If the food is done and safe, say so and advise the next step (rest or pull). Add judgement; do not just repeat numbers the user can already see."},
+          {"role": "user", "content": {{
+              ("Live cook data (Celsius). Mode: " ~ states('input_select.chef_iq_probe_mode')
+              ~ ", Meat type: " ~ states('input_select.chef_iq_meat_type')
+              ~ ", Core: " ~ states('sensor.chefiq_meat_temperature')
+              ~ ", Oven/ambient: " ~ states('sensor.chefiq_ambient_temperature')
+              ~ ", Rate C/min: " ~ states('sensor.chefiq_meat_rate')
+              ~ ", Target: " ~ states('input_number.chefiq_target_temperature')
+              ~ ", Pasteurization %: " ~ states('sensor.chef_iq_pasteurization')
+              ~ ", Food safety: " ~ states('sensor.chef_iq_food_safety')
+              ~ ", Phase: " ~ states('sensor.chef_iq_cook_phase')
+              ~ ", Juiciness %: " ~ states('sensor.chef_iq_juiciness')
+              ~ ", Predicted final: " ~ states('sensor.chef_iq_predicted_final_temp')
+              ) | to_json }} }
+        ]
+      }
+
+# ── Helpers (or create in the UI) ────────────────────────────────────────────
+input_text:
+  chef_iq_ai_coach:
+    name: Chef iQ AI Coach
+    max: 255
+    icon: mdi:robot-happy
+
+input_boolean:
+  chef_iq_ai_announce:
+    name: Chef iQ AI Announce
+    icon: mdi:bullhorn
+
+input_datetime:
+  chef_iq_ai_coach_updated:
+    name: Chef iQ AI Coach Updated
+    has_date: true
+    has_time: true
+
+# ── The 5-minute poll (Automations editor → edit in YAML) ────────────────────
+automation:
+  - id: chefiq_ai_coach_poll
+    alias: "ChefIQ · AI Coach (5 min)"
+    description: Poll the LLM every 5 minutes during a cook for an expert insight.
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.chefiq_cook_active
+        state: "on"
+    actions:
+      - action: rest_command.chefiq_ai_coach
+        response_variable: ai
+        continue_on_error: true
+      - variables:
+          insight: >-
+            {{ (ai.content.choices[0].message.content | default('')) if (ai is defined and ai.content is defined) else '' }}
+      - condition: template
+        value_template: "{{ insight | length > 3 }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.chef_iq_ai_coach
+        data:
+          value: "{{ insight[:255] }}"
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.chef_iq_ai_coach_updated
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      - if:
+          - condition: state
+            entity_id: input_boolean.chef_iq_ai_announce
+            state: "on"
+        then:
+          - action: script.chefiq_kitchen_announce
+            data:
+              message: "{{ insight }}"
+              volume: 38
