@@ -1,0 +1,124 @@
+# =============================================================================
+# Chef iQ — Kitchen Announce (Sonos TTS that ALWAYS restores the music volume)
+# =============================================================================
+# A reusable script the AI Cook Coach / Setup / End automations call to speak a
+# message on a Sonos speaker over the top of music, then put everything back.
+#
+# THE BUG THIS FIXES: "after it speaks, the music volume stays raised."
+# Cause: the announce temporarily raises the speaker volume, and Sonos'
+# `sonos.restore` does not reliably restore the *volume* (only the queue /
+# position). Worse, if two announcements overlap — or one is cancelled
+# mid-speech — a naive "remember the volume at the start of THIS call" approach
+# captures the already-raised volume and "restores" to that, so it ratchets up.
+#
+# THE FIX (robust against overlap & cancellation):
+#   • Store the original volume in a PERSISTENT helper
+#     (input_number.chef_iq_sonos_prev_volume), and only capture it when an
+#     announcement is NOT already in progress (guarded by
+#     input_boolean.chef_iq_announcing). A cancelled/overlapping run therefore
+#     can never overwrite the true original.
+#   • `sonos.snapshot`/`sonos.restore` still handle the queue/track position,
+#     but volume restoration is done explicitly from the helper as the LAST
+#     step — so the volume always returns exactly to where it was, even if
+#     `sonos.restore` drops the volume part.
+#   • `continue_on_error` on snapshot/restore so a Sonos hiccup can never abort
+#     the script before the volume is put back and the flag is cleared.
+#
+# Change the entity_ids to yours:
+#   media_player.sonos     → your Sonos speaker
+#   tts.openai_tts_nova    → your TTS engine entity
+# =============================================================================
+
+# ── Helpers (create in the UI or via the API) ────────────────────────────────
+input_number:
+  chef_iq_sonos_prev_volume:
+    name: Chef iQ Sonos Prev Volume
+    min: 0
+    max: 1
+    step: 0.01
+    initial: 0.3
+    icon: mdi:volume-high
+    mode: box
+
+input_boolean:
+  chef_iq_announcing:
+    name: Chef iQ Announcing
+    icon: mdi:bullhorn-variant
+
+# ── The script ───────────────────────────────────────────────────────────────
+script:
+  chefiq_kitchen_announce:
+    alias: "Chef iQ · Kitchen Announce"
+    icon: mdi:bullhorn
+    mode: queued          # serialise overlapping announcements
+    max: 5
+    fields:
+      message:
+        description: Text to speak
+        example: Your meat is ready
+        selector:
+          text:
+      volume:
+        description: Announce volume 0-100
+        default: 40
+        selector:
+          number: { min: 0, max: 100, step: 5 }
+    sequence:
+      - variables:
+          spk: media_player.sonos
+          was_playing: "{{ is_state('media_player.sonos','playing') }}"
+          cur_vol: "{{ state_attr('media_player.sonos','volume_level') | float(0.3) }}"
+          # ~2 words/sec speech estimate, so we wait long enough but not forever.
+          speak_secs: "{{ [3 + (((message | default('')) | string).split() | length) / 2.0, 30] | min }}"
+
+      # Capture the TRUE original volume ONLY if we're not already announcing.
+      # This is what makes it immune to overlap / cancelled runs.
+      - if:
+          - condition: state
+            entity_id: input_boolean.chef_iq_announcing
+            state: "off"
+        then:
+          - action: input_boolean.turn_on
+            target: { entity_id: input_boolean.chef_iq_announcing }
+          - action: input_number.set_value
+            target: { entity_id: input_number.chef_iq_sonos_prev_volume }
+            data: { value: "{{ cur_vol }}" }
+          - action: sonos.snapshot
+            continue_on_error: true
+            data: { entity_id: media_player.sonos, with_group: true }
+
+      # Duck the music UP to the announce volume and speak.
+      - action: media_player.volume_set
+        target: { entity_id: media_player.sonos }
+        data: { volume_level: "{{ (volume | default(40) | float) / 100 }}" }
+      - action: tts.speak
+        target: { entity_id: tts.openai_tts_nova }
+        data:
+          media_player_entity_id: media_player.sonos
+          cache: true
+          message: "{{ message }}"
+
+      # Wait for speech to start, then for its (estimated) duration.
+      - wait_template: "{{ is_state('media_player.sonos','playing') }}"
+        timeout: { seconds: 4 }
+        continue_on_timeout: true
+      - delay: { seconds: "{{ speak_secs | int }}" }
+
+      # Put the music back (queue/position). Guarded so it can't abort us.
+      - if:
+          - condition: template
+            value_template: "{{ was_playing }}"
+        then:
+          - action: sonos.restore
+            continue_on_error: true
+            data: { entity_id: media_player.sonos, with_group: true }
+          - delay: { seconds: 1 }
+
+      # ALWAYS restore the exact original volume from the helper (bulletproof).
+      - action: media_player.volume_set
+        target: { entity_id: media_player.sonos }
+        data: { volume_level: "{{ states('input_number.chef_iq_sonos_prev_volume') | float(0.3) }}" }
+
+      # Clear the in-progress flag so the next announcement re-captures fresh.
+      - action: input_boolean.turn_off
+        target: { entity_id: input_boolean.chef_iq_announcing }
