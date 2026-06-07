@@ -1,0 +1,206 @@
+# =============================================================================
+# Chef iQ CQ60 — Cooking-Physics Package
+# =============================================================================
+# Turns the probe's raw sensors into derived "cooking intelligence": food-safety
+# pasteurization, physics-based ETA, carryover, doneness quality, and more.
+#
+# THE SCIENCE (with sources):
+#   * Pasteurization / lethality integral  F = ∫ 10^((T-Tref)/z) dt
+#     — Douglas Baldwin, "A Practical Guide to Sous Vide Cooking", Appendix A;
+#       FDA Food Code 3-401.11 (meat) and FSIS Appendix A (poultry) time-temp
+#       tables. z and target minutes below are tuned so the model reproduces the
+#       published tables at their reference points (60 °C: meat 12 min, poultry
+#       35 min; conservative at lower temperatures).
+#   * Smart ETA — Newton's law of cooling/heating: dT/dt = r·(T_env − T_core),
+#       so t_remaining = (T_env−T_core)/(dT/dt) · ln((T_env−T_core)/(T_env−T_tgt)).
+#       Accurate near the asymptote where a linear ETA fails.
+#   * Juiciness/water-holding falls sharply above ~60–65 °C (Baldwin §"Effects of
+#       Heat on Meat"; Tornberg 2005). Collagen → gelatin above ~55 °C over hours.
+#   * Rapid-cooling rule — FDA 2-stage: 57→21 °C within 2 h, then to ≤5 °C within
+#       6 h total, to prevent C. perfringens/spore outgrowth.
+#
+# ⚠️  GUIDANCE, NOT GOSPEL: this is a hobby aid. For at-risk diners always follow
+#     the USDA minimums / your Chef iQ app. The probe measures ONE point.
+#
+# -----------------------------------------------------------------------------
+# INSTALL:
+#   1. Enable packages once in configuration.yaml:
+#         homeassistant:
+#           packages: !include_dir_named packages
+#   2. Drop this file in  /config/packages/cooking_physics_package.yaml
+#   3. Map the entity IDs below to YOUR probe, then restart Home Assistant.
+#
+# ENTITY MAP — find/replace these to match your install:
+#   CORE    sensor.chef_iq_cq60_tip               (deepest / food-core sensor)
+#   RING1   sensor.chef_iq_cq60_ring_1
+#   RING2   sensor.chef_iq_cq60_ring_2
+#   AMBIENT sensor.chef_iq_cq60_ambient           (pit / oven / handle-end)
+#   TARGET  input_number.chefiq_target_temperature
+#   PRESET  input_select.chefiq_preset
+# (RATE is created for you below as sensor.chefiq_meat_rate.)
+# =============================================================================
+
+# ---- Rate of rise (°C/min), 2-minute smoothed -------------------------------
+sensor:
+  - platform: derivative
+    source: sensor.chef_iq_cq60_tip
+    name: Chef iQ Meat Rate
+    unit_time: min
+    time_window: "00:02:00"
+    round: 1
+
+  # ---- Pasteurization accumulator: ∫ lethality-rate dt  (equiv-min @ 60 °C) --
+  - platform: integration
+    source: sensor.chefiq_lethality_rate
+    name: Chef iQ Pasteurization F60
+    method: trapezoidal
+    unit_time: min
+    round: 2
+
+  # ---- Collagen breakdown accumulator: equiv-hours @ 80 °C -------------------
+  - platform: integration
+    source: sensor.chefiq_collagen_rate
+    name: Chef iQ Collagen Hours
+    method: trapezoidal
+    unit_time: h
+    round: 2
+
+template:
+  - sensor:
+      # ---- Smart ETA to target (Newton's law of cooling) ------------------
+      - name: Chef iQ ETA to Target
+        unit_of_measurement: min
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set amb = states('sensor.chef_iq_cq60_ambient')|float(none) %}
+          {% set rate = states('sensor.chefiq_meat_rate')|float(0) %}
+          {% set tgt = states('input_number.chefiq_target_temperature')|float(none) %}
+          {% if core is none or amb is none or tgt is none %}unknown
+          {% elif core >= tgt %}0
+          {% elif amb <= tgt + 1 or rate <= 0.02 %}unknown
+          {% else %}{{ [ (amb-core)/rate * log((amb-core)/(amb-tgt)), 0]|max|round(0) }}
+          {% endif %}
+
+      # ---- Dynamic carryover (°C the core will keep rising after removal) --
+      - name: Chef iQ Dynamic Carryover
+        unit_of_measurement: "°C"
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set r1 = states('sensor.chef_iq_cq60_ring_1')|float(none) %}
+          {% set r2 = states('sensor.chef_iq_cq60_ring_2')|float(none) %}
+          {% set rate = states('sensor.chefiq_meat_rate')|float(0) %}
+          {% if core is none %}unknown
+          {% else %}
+          {% set outer = [ (r1 if r1 is not none else core), (r2 if r2 is not none else core) ]|max %}
+          {% set grad = outer - core %}{{ [ [0.3*grad + 1.5*rate, 0]|max, 10]|min|round(1) }}
+          {% endif %}
+
+      # ---- Predicted final temperature after resting ----------------------
+      - name: Chef iQ Predicted Final Temp
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set carry = states('sensor.chefiq_dynamic_carryover')|float(0) %}
+          {% if core is none %}unknown{% else %}{{ (core + carry)|round(1) }}{% endif %}
+
+      # ---- Doneness evenness: internal gradient spread (°C, lower = even) --
+      - name: Chef iQ Doneness Spread
+        unit_of_measurement: "°C"
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set r1 = states('sensor.chef_iq_cq60_ring_1')|float(none) %}
+          {% set r2 = states('sensor.chef_iq_cq60_ring_2')|float(none) %}
+          {% set ns = namespace(v=[]) %}
+          {% if core is not none %}{% set ns.v = ns.v + [core] %}{% endif %}
+          {% if r1 is not none %}{% set ns.v = ns.v + [r1] %}{% endif %}
+          {% if r2 is not none %}{% set ns.v = ns.v + [r2] %}{% endif %}
+          {% if ns.v|length >= 2 %}{{ (ns.v|max - ns.v|min)|round(1) }}{% else %}0{% endif %}
+
+      # ---- Resting equilibrium temperature (energy-conservation mean) ------
+      - name: Chef iQ Rested Temp
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set r1 = states('sensor.chef_iq_cq60_ring_1')|float(none) %}
+          {% set r2 = states('sensor.chef_iq_cq60_ring_2')|float(none) %}
+          {% set ns = namespace(v=[]) %}
+          {% if core is not none %}{% set ns.v = ns.v + [core] %}{% endif %}
+          {% if r1 is not none %}{% set ns.v = ns.v + [r1] %}{% endif %}
+          {% if r2 is not none %}{% set ns.v = ns.v + [r2] %}{% endif %}
+          {% if ns.v|length >= 1 %}{{ (ns.v|sum / ns.v|length)|round(1) }}{% else %}unknown{% endif %}
+
+      # ---- Juiciness % if pulled now (water-holding vs core temp) ----------
+      - name: Chef iQ Juiciness
+        unit_of_measurement: "%"
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if core is none %}unknown
+          {% elif core <= 54 %}100
+          {% elif core <= 60 %}{{ (100 - (core-54)*4)|round(0) }}
+          {% elif core <= 71 %}{{ (76 - (core-60)*3)|round(0) }}
+          {% else %}{{ [43 - (core-71)*3, 5]|max|round(0) }}{% endif %}
+
+      # ---- Cook phase state machine ---------------------------------------
+      - name: Chef iQ Cook Phase
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set amb = states('sensor.chef_iq_cq60_ambient')|float(none) %}
+          {% set rate = states('sensor.chefiq_meat_rate')|float(0) %}
+          {% set tgt = states('input_number.chefiq_target_temperature')|float(none) %}
+          {% set active = is_state('input_boolean.chefiq_cook_active','on') %}
+          {% if core is none %}Unknown
+          {% elif not active and core < 35 %}Idle
+          {% elif tgt is not none and core >= tgt + 3 %}Overshoot
+          {% elif tgt is not none and core >= tgt %}Done
+          {% elif rate < 0.15 and core >= 60 and core <= 75 and amb is not none and amb > core + 12 %}Stalling
+          {% elif tgt is not none and core >= tgt - 5 %}Approaching
+          {% elif rate > 0.1 %}Heating
+          {% else %}Holding{% endif %}
+
+      # ---- Lethality rate (equiv-min @ 60 °C per min) → feeds the F60 integral
+      #      z tuned to FDA/FSIS: poultry 6.45, red meat 5.5, default 6.0.
+      - name: Chef iQ Lethality Rate
+        state_class: measurement
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set preset = states('input_select.chefiq_preset') %}
+          {% set z = 6.45 if (preset is string and ('Chicken' in preset or 'Turkey' in preset))
+                     else (5.5 if (preset is string and ('Beef' in preset or 'Lamb' in preset or 'Pork' in preset or 'Burger' in preset))
+                     else 6.0) %}
+          {% if core is not none and core >= 50 %}{{ (10 ** ((core - 60)/z))|round(4) }}{% else %}0{% endif %}
+
+      # ---- Pasteurization % toward target log-reduction --------------------
+      - name: Chef iQ Pasteurization
+        unit_of_measurement: "%"
+        state: >
+          {% set f = states('sensor.chefiq_pasteurization_f60')|float(0) %}
+          {% set preset = states('input_select.chefiq_preset') %}
+          {% set tgt = 35 if (preset is string and ('Chicken' in preset or 'Turkey' in preset))
+                       else (12 if (preset is string and ('Beef' in preset or 'Lamb' in preset or 'Pork' in preset or 'Burger' in preset))
+                       else 20) %}
+          {{ [100*f/tgt, 100]|min|round(0) }}
+
+      - name: Chef iQ Safe To Eat
+        state: >
+          {% set f = states('sensor.chefiq_pasteurization_f60')|float(0) %}
+          {% set preset = states('input_select.chefiq_preset') %}
+          {% set tgt = 35 if (preset is string and ('Chicken' in preset or 'Turkey' in preset))
+                       else (12 if (preset is string and ('Beef' in preset or 'Lamb' in preset or 'Pork' in preset or 'Burger' in preset))
+                       else 20) %}
+          {% if f >= tgt %}Pasteurized{% elif f > 0 %}In progress{% else %}Not started{% endif %}
+
+      # ---- Collagen rate (equiv-hours @ 80 °C per hour) → feeds Collagen Hours
+      - name: Chef iQ Collagen Rate
+        state_class: measurement
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if core is not none and core >= 55 %}{{ (10 ** ((core - 80)/17.0))|round(4) }}{% else %}0{% endif %}
+
+      # ---- Braise tenderness % (tough cuts; ~12 equiv-h @ 80 °C = tender) --
+      - name: Chef iQ Braise Tenderness
+        unit_of_measurement: "%"
+        state: >
+          {% set h = states('sensor.chefiq_collagen_hours')|float(0) %}
+          {{ [100*h/12.0, 100]|min|round(0) }}
