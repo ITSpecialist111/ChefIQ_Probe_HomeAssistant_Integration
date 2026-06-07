@@ -424,3 +424,89 @@ template:
           {% set b = tbl.get(states('input_select.chef_iq_chocolate_type'), [48,28,31,32,33]) %}
           {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
           {% if t is none %}Unknown{% elif t >= b[2] and t <= b[4] %}Yes{% else %}No{% endif %}
+
+      # =====================================================================
+      # PIZZA-DOUGH PROOFING — temperature-compensated "% proofed"
+      # ---------------------------------------------------------------------
+      # The probe can't see dough VOLUME, but dough TEMPERATURE is the biggest
+      # (and invisible) driver of proof speed. By integrating yeast activity
+      # over time we get a "% proofed" that accounts for a cold vs warm
+      # kitchen — more reliable than eyeballing the rise.
+      #
+      # Yeast activity ≈ Q10 ≈ 2.5 referenced to 24 °C (the pizza-fermentation
+      # standard reference, after TXCraig1 / Gänzle), rising to a ~32 °C peak,
+      # then falling to zero by ~45 °C (yeast death). Below 2 °C and above
+      # 45 °C the rate is gated to 0 so fridge/cooking temps don't pollute it.
+      #
+      # REQUIRED HELPERS:
+      #   input_number.chef_iq_proof_target_hours   # recipe's room-temp (24°C) proof hours, e.g. 4
+      #   input_number.chef_iq_proof_baseline       # captured when you start a batch
+      #   input_button.chef_iq_proof_start          # press to start/reset a proof
+      #   input_datetime.chef_iq_proof_start_time
+      # And a Riemann integration helper accumulating sensor.chef_iq_proof_rate
+      # over hours, named sensor.chef_iq_proof_hours_total.
+      # A simple automation captures the baseline on the start button:
+      #   trigger: state of input_button.chef_iq_proof_start
+      #   action: input_number.set_value baseline =
+      #           {{ states('sensor.chef_iq_proof_hours_total')|float(0) }}
+      #
+      # STILL DO THE POKE TEST near 100% — this tracks activity, not the bake.
+      # =====================================================================
+
+      # Relative yeast activity vs 24 °C, gated to the yeast-active band
+      - name: Chef iQ Proof Rate
+        unit_of_measurement: "x"
+        state_class: measurement
+        state: >
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if t is none or t < 2 or t >= 45 %}0
+          {% elif t <= 32 %}{{ (2.5 ** ((t-24)/10))|round(3) }}
+          {% else %}{% set peak = 2.5 ** 0.8 %}{{ [peak * (45-t)/13, 0]|max|round(3) }}{% endif %}
+
+      # 24 °C-equivalent proof hours accumulated this batch
+      - name: Chef iQ Proof Progress
+        unit_of_measurement: h
+        state_class: measurement
+        state: >
+          {% set total = states('sensor.chef_iq_proof_hours_total')|float(0) %}
+          {% set base = states('input_number.chef_iq_proof_baseline')|float(0) %}
+          {{ [total-base, 0]|max|round(2) }}
+
+      - name: Chef iQ Proof Percent
+        unit_of_measurement: "%"
+        state_class: measurement
+        state: >
+          {% set prog = states('sensor.chef_iq_proof_progress')|float(0) %}
+          {% set tgt = states('input_number.chef_iq_proof_target_hours')|float(4) %}
+          {{ [100*prog/tgt, 150]|min|round(0) }}
+
+      - name: Chef iQ Proof ETA
+        unit_of_measurement: min
+        state: >
+          {% set prog = states('sensor.chef_iq_proof_progress')|float(0) %}
+          {% set tgt = states('input_number.chef_iq_proof_target_hours')|float(4) %}
+          {% set rate = states('sensor.chef_iq_proof_rate')|float(0) %}
+          {% if prog >= tgt %}0{% elif rate <= 0.02 %}unknown
+          {% else %}{{ ((tgt-prog)/rate*60)|round(0) }}{% endif %}
+
+      - name: Chef iQ Proof Status
+        state: >
+          {% set prog = states('sensor.chef_iq_proof_progress')|float(0) %}
+          {% set tgt = states('input_number.chef_iq_proof_target_hours')|float(4) %}
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set pct = 100*prog/tgt %}
+          {% if t is none %}No probe
+          {% elif pct < 5 %}Not started - press Proof Start
+          {% elif pct < 80 %}Proofing {{ pct|round(0) }}% ({{ t|round(1) }}°C)
+          {% elif pct < 100 %}Almost ready {{ pct|round(0) }}% - watch it
+          {% elif pct <= 120 %}✅ Ready - poke test now ({{ pct|round(0) }}%)
+          {% else %}⚠️ Likely over-proofed ({{ pct|round(0) }}%){% endif %}
+
+      - name: Chef iQ Dough Temp Tip
+        state: >
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if t is none %}Unknown
+          {% elif t < 18 %}Cool {{ t|round(1) }}°C - slow proof, find a warmer spot
+          {% elif t <= 27 %}Good {{ t|round(1) }}°C - ideal proofing range
+          {% elif t <= 30 %}Warm {{ t|round(1) }}°C - fast, watch closely
+          {% else %}Hot {{ t|round(1) }}°C - risk of over-proof / off flavours{% endif %}
