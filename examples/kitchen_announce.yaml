@@ -34,6 +34,10 @@
 # while informational announcements (coach/setup/end) pass nothing and stay
 # gentle/relative.
 #
+# The `boost` defaults to the input_number.chef_iq_announce_boost slider, so you
+# can tune how far announcements sit above the music from the dashboard without
+# editing YAML. (A caller can still pass an explicit boost to override it.)
+#
 # Change the entity_ids to yours:
 #   media_player.sonos     → your Sonos speaker
 #   tts.openai_tts_nova    → your TTS engine entity
@@ -49,6 +53,15 @@ input_number:
     initial: 0.3
     icon: mdi:volume-high
     mode: box
+  chef_iq_announce_boost:        # dashboard slider: points above music to speak
+    name: Chef iQ Announce Boost
+    min: 0
+    max: 30
+    step: 1
+    initial: 8
+    unit_of_measurement: pts
+    icon: mdi:volume-plus
+    mode: slider
 
 input_boolean:
   chef_iq_announcing:
@@ -74,8 +87,7 @@ script:
         selector:
           number: { min: 0, max: 100, step: 1 }
       boost:
-        description: How many points ABOVE the current music level to speak
-        default: 8
+        description: Points ABOVE the current music level to speak (unset = use the Announce Boost slider helper)
         selector:
           number: { min: 0, max: 50, step: 1 }
       cap:
@@ -89,7 +101,8 @@ script:
           was_playing: "{{ is_state('media_player.sonos','playing') }}"
           cur_vol: "{{ state_attr('media_player.sonos','volume_level') | float(0.3) }}"
           min_level: "{{ volume | default(0) | float }}"
-          boost: "{{ boost | default(8) | float }}"
+          # Caller may override boost; otherwise use the dashboard slider helper.
+          boost: "{{ (boost if boost is defined else states('input_number.chef_iq_announce_boost')) | float(8) }}"
           cap: "{{ cap | default(80) | float }}"
           # ~2 words/sec speech estimate, so we wait long enough but not forever.
           speak_secs: "{{ [3 + (((message | default('')) | string).split() | length) / 2.0, 30] | min }}"
