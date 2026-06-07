@@ -38,6 +38,18 @@
 #   TARGET  input_number.chefiq_target_temperature
 #   PRESET  input_select.chefiq_preset
 # (RATE is created for you below as sensor.chefiq_meat_rate.)
+#
+# REQUIRED HELPER for the safety math — create this input_select (Settings →
+# Devices & Services → Helpers, or YAML below) and pick what you're cooking:
+#   input_select:
+#     chef_iq_meat_type:
+#       name: Chef iQ Meat Type
+#       icon: mdi:food-steak
+#       options:
+#         - Intact cut (steak/roast)   # surface is hottest → core is conservative
+#         - Ground / tenderized        # pathogens throughout → core is the point
+#         - Poultry                    # longest hold (7-log Salmonella ≈ 35 min)
+#         - Fish
 # =============================================================================
 
 # ---- Rate of rise (°C/min), 2-minute smoothed -------------------------------
@@ -160,35 +172,34 @@ template:
           {% else %}Holding{% endif %}
 
       # ---- Lethality rate (equiv-min @ 60 °C per min) → feeds the F60 integral
-      #      z tuned to FDA/FSIS: poultry 6.45, red meat 5.5, default 6.0.
+      #      z by meat type (input_select.chef_iq_meat_type): poultry 6.45,
+      #      fish 5.66, red meat / intact 5.5. Tuned to reproduce FDA/FSIS.
       - name: Chef iQ Lethality Rate
         state_class: measurement
         state: >
           {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
-          {% set preset = states('input_select.chefiq_preset') %}
-          {% set z = 6.45 if (preset is string and ('Chicken' in preset or 'Turkey' in preset))
-                     else (5.5 if (preset is string and ('Beef' in preset or 'Lamb' in preset or 'Pork' in preset or 'Burger' in preset))
-                     else 6.0) %}
+          {% set mt = states('input_select.chef_iq_meat_type') %}
+          {% set z = 6.45 if mt == 'Poultry' else (5.66 if mt == 'Fish' else 5.5) %}
           {% if core is not none and core >= 50 %}{{ (10 ** ((core - 60)/z))|round(4) }}{% else %}0{% endif %}
 
       # ---- Pasteurization % toward target log-reduction --------------------
+      #      Target equiv-minutes @ 60 °C by meat type. Poultry needs the
+      #      longest hold (7-log Salmonella ≈ 35 min); intact whole-muscle
+      #      pasteurizes from the hot surface inward, so a conservative core
+      #      target (8 min) is used; ground 12 min; fish 5 min.
       - name: Chef iQ Pasteurization
         unit_of_measurement: "%"
         state: >
           {% set f = states('sensor.chefiq_pasteurization_f60')|float(0) %}
-          {% set preset = states('input_select.chefiq_preset') %}
-          {% set tgt = 35 if (preset is string and ('Chicken' in preset or 'Turkey' in preset))
-                       else (12 if (preset is string and ('Beef' in preset or 'Lamb' in preset or 'Pork' in preset or 'Burger' in preset))
-                       else 20) %}
+          {% set mt = states('input_select.chef_iq_meat_type') %}
+          {% set tgt = 35 if mt == 'Poultry' else (12 if mt == 'Ground / tenderized' else (5 if mt == 'Fish' else 8)) %}
           {{ [100*f/tgt, 100]|min|round(0) }}
 
       - name: Chef iQ Safe To Eat
         state: >
           {% set f = states('sensor.chefiq_pasteurization_f60')|float(0) %}
-          {% set preset = states('input_select.chefiq_preset') %}
-          {% set tgt = 35 if (preset is string and ('Chicken' in preset or 'Turkey' in preset))
-                       else (12 if (preset is string and ('Beef' in preset or 'Lamb' in preset or 'Pork' in preset or 'Burger' in preset))
-                       else 20) %}
+          {% set mt = states('input_select.chef_iq_meat_type') %}
+          {% set tgt = 35 if mt == 'Poultry' else (12 if mt == 'Ground / tenderized' else (5 if mt == 'Fish' else 8)) %}
           {% if f >= tgt %}Pasteurized{% elif f > 0 %}In progress{% else %}Not started{% endif %}
 
       # ---- Collagen rate (equiv-hours @ 80 °C per hour) → feeds Collagen Hours
