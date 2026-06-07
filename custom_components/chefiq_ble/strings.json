@@ -21,12 +21,10 @@
     },
     "entity": {
         "sensor": {
-            "meat_temperature": { "name": "Meat temperature" },
-            "probe_tip_temperature": { "name": "Probe tip" },
-            "probe_1_temperature": { "name": "Probe ring 1" },
-            "probe_2_temperature": { "name": "Probe ring 2" },
-            "probe_3_temperature": { "name": "Probe ring 3" },
-            "ambient_temperature": { "name": "Ambient temperature" },
+            "tip_temperature": { "name": "Tip" },
+            "ring_1_temperature": { "name": "Ring 1" },
+            "ring_2_temperature": { "name": "Ring 2" },
+            "ambient_temperature": { "name": "Ambient" },
             "battery": { "name": "Battery" },
             "rssi": { "name": "Signal strength" }
         }

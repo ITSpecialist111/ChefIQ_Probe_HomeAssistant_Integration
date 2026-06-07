@@ -15,8 +15,8 @@ views:
         icon: mdi:food-steak
 
       - type: gauge
-        entity: sensor.chef_iq_cq60_meat_temperature
-        name: Meat
+        entity: sensor.chef_iq_cq60_tip
+        name: Tip
         min: 0
         max: 100
         severity:
@@ -25,19 +25,17 @@ views:
           red: 75
 
       - type: entities
-        title: All rings
+        title: All sensors
         entities:
-          - sensor.chef_iq_cq60_meat_temperature
-          - sensor.chef_iq_cq60_probe_tip
-          - sensor.chef_iq_cq60_probe_ring_1
-          - sensor.chef_iq_cq60_probe_ring_2
-          - sensor.chef_iq_cq60_probe_ring_3
-          - sensor.chef_iq_cq60_ambient_temperature
+          - sensor.chef_iq_cq60_tip
+          - sensor.chef_iq_cq60_ring_1
+          - sensor.chef_iq_cq60_ring_2
+          - sensor.chef_iq_cq60_ambient
           - sensor.chef_iq_cq60_battery
 
       - type: history-graph
         title: Last hour
         hours_to_show: 1
         entities:
-          - sensor.chef_iq_cq60_meat_temperature
-          - sensor.chef_iq_cq60_ambient_temperature
+          - sensor.chef_iq_cq60_tip
+          - sensor.chef_iq_cq60_ambient

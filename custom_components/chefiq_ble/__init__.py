@@ -54,17 +54,20 @@ def parse_chefiq_payload(payload: bytes) -> dict[str, Any] | None:
 
     * ``0x01`` temperature (18 bytes) — byte ``[1]`` is a flags/sequence
       field, followed by seven little-endian ``uint16`` temperature slots
-      (°C × 10) spanning bytes ``[2:16]``, then a 2-byte checksum. Slot 0
-      mirrors the ambient slot (slot 6); the firmware emits ``0x7FFB`` /
-      ``0x7FFE`` / ``0x7FFF`` for any ring that is not currently reading.
+      (°C × 10) spanning bytes ``[2:16]``, then a 2-byte checksum.
+
+      The CQ60 has four physical temperature sensors, validated live by a
+      monotonic tip→handle gradient. Two of the seven slots are redundant:
+      slot 0 mirrors slot 6 (ambient), and slot 5 is always the
+      not-measured sentinel (``0x7FFB`` / ``0x7FFE`` / ``0x7FFF``).
 
           slot 0  ([2:4])    ambient mirror (ignored — same as slot 6)
-          slot 1  ([4:6])    probe ring 3
-          slot 2  ([6:8])    meat (tip-most ring)
-          slot 3  ([8:10])   probe tip
-          slot 4  ([10:12])  probe ring 1
-          slot 5  ([12:14])  probe ring 2
-          slot 6  ([14:16])  ambient (handle-end)
+          slot 1  ([4:6])    redundant (ignored)
+          slot 2  ([6:8])    tip — food-core (deepest) sensor
+          slot 3  ([8:10])   ring 1
+          slot 4  ([10:12])  ring 2
+          slot 5  ([12:14])  not-measured sentinel (ignored)
+          slot 6  ([14:16])  ambient (handle / black-end) sensor
 
     * ``0x03`` identity (17 bytes) — bytes ``[2:8]`` are the BD address and
       byte ``[8]`` is the battery percentage (0-100, already scaled by the
@@ -84,11 +87,9 @@ def parse_chefiq_payload(payload: bytes) -> dict[str, Any] | None:
         except Exception:  # noqa: BLE001
             return None
         return {
-            "meat_temperature": _decode_temp(slots[2]),
-            "probe_tip_temperature": _decode_temp(slots[3]),
-            "probe_1_temperature": _decode_temp(slots[4]),
-            "probe_2_temperature": _decode_temp(slots[5]),
-            "probe_3_temperature": _decode_temp(slots[1]),
+            "tip_temperature": _decode_temp(slots[2]),
+            "ring_1_temperature": _decode_temp(slots[3]),
+            "ring_2_temperature": _decode_temp(slots[4]),
             "ambient_temperature": _decode_temp(slots[6]),
         }
 

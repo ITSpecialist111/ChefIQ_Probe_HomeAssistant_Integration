@@ -16,8 +16,8 @@
 # Chef iQ BLE -> click each device -> pencil icon. The entity IDs follow
 # the device name, so you'll end up with:
 #
-#   sensor.brisket_meat_temperature
-#   sensor.chicken_meat_temperature
+#   sensor.brisket_tip
+#   sensor.chicken_tip
 #   ...
 #
 # That makes dashboards / automations vastly more readable. The example
@@ -42,19 +42,21 @@ views:
             heading_style: title
             icon: mdi:food-steak
           - type: gauge
-            entity: sensor.chef_iq_cq60_meat_temperature
-            name: Meat
+            entity: sensor.chef_iq_cq60_tip
+            name: Tip
             min: 0
             max: 100
             severity: { green: 60, yellow: 50, red: 75 }
           - type: glance
             entities:
-              - entity: sensor.chef_iq_cq60_ambient_temperature
+              - entity: sensor.chef_iq_cq60_ring_1
+                name: Ring 1
+              - entity: sensor.chef_iq_cq60_ring_2
+                name: Ring 2
+              - entity: sensor.chef_iq_cq60_ambient
                 name: Ambient
               - entity: sensor.chef_iq_cq60_battery
                 name: Battery
-              - entity: sensor.chef_iq_cq60_probe_tip
-                name: Tip
 
       # ---------- Probe 2 ----------
       - type: grid
@@ -64,19 +66,21 @@ views:
             heading_style: title
             icon: mdi:food-drumstick
           - type: gauge
-            entity: sensor.chef_iq_cq60_2_meat_temperature
-            name: Meat
+            entity: sensor.chef_iq_cq60_2_tip
+            name: Tip
             min: 0
             max: 100
             severity: { green: 74, yellow: 65, red: 80 }
           - type: glance
             entities:
-              - entity: sensor.chef_iq_cq60_2_ambient_temperature
+              - entity: sensor.chef_iq_cq60_2_ring_1
+                name: Ring 1
+              - entity: sensor.chef_iq_cq60_2_ring_2
+                name: Ring 2
+              - entity: sensor.chef_iq_cq60_2_ambient
                 name: Ambient
               - entity: sensor.chef_iq_cq60_2_battery
                 name: Battery
-              - entity: sensor.chef_iq_cq60_2_probe_tip
-                name: Tip
 
       # ---------- Probe 3 ----------
       - type: grid
@@ -86,19 +90,21 @@ views:
             heading_style: title
             icon: mdi:food-variant
           - type: gauge
-            entity: sensor.chef_iq_cq60_3_meat_temperature
-            name: Meat
+            entity: sensor.chef_iq_cq60_3_tip
+            name: Tip
             min: 0
             max: 100
             severity: { green: 60, yellow: 50, red: 75 }
           - type: glance
             entities:
-              - entity: sensor.chef_iq_cq60_3_ambient_temperature
+              - entity: sensor.chef_iq_cq60_3_ring_1
+                name: Ring 1
+              - entity: sensor.chef_iq_cq60_3_ring_2
+                name: Ring 2
+              - entity: sensor.chef_iq_cq60_3_ambient
                 name: Ambient
               - entity: sensor.chef_iq_cq60_3_battery
                 name: Battery
-              - entity: sensor.chef_iq_cq60_3_probe_tip
-                name: Tip
 
       # ---------- Probe 4 ----------
       - type: grid
@@ -108,19 +114,21 @@ views:
             heading_style: title
             icon: mdi:fish
           - type: gauge
-            entity: sensor.chef_iq_cq60_4_meat_temperature
-            name: Meat
+            entity: sensor.chef_iq_cq60_4_tip
+            name: Tip
             min: 0
             max: 100
             severity: { green: 55, yellow: 45, red: 65 }
           - type: glance
             entities:
-              - entity: sensor.chef_iq_cq60_4_ambient_temperature
+              - entity: sensor.chef_iq_cq60_4_ring_1
+                name: Ring 1
+              - entity: sensor.chef_iq_cq60_4_ring_2
+                name: Ring 2
+              - entity: sensor.chef_iq_cq60_4_ambient
                 name: Ambient
               - entity: sensor.chef_iq_cq60_4_battery
                 name: Battery
-              - entity: sensor.chef_iq_cq60_4_probe_tip
-                name: Tip
 
       # ---------- Combined trend ----------
       - type: grid
@@ -133,14 +141,14 @@ views:
           - type: history-graph
             hours_to_show: 2
             entities:
-              - sensor.chef_iq_cq60_meat_temperature
-              - sensor.chef_iq_cq60_2_meat_temperature
-              - sensor.chef_iq_cq60_3_meat_temperature
-              - sensor.chef_iq_cq60_4_meat_temperature
-              - sensor.chef_iq_cq60_ambient_temperature
-              - sensor.chef_iq_cq60_2_ambient_temperature
-              - sensor.chef_iq_cq60_3_ambient_temperature
-              - sensor.chef_iq_cq60_4_ambient_temperature
+              - sensor.chef_iq_cq60_tip
+              - sensor.chef_iq_cq60_2_tip
+              - sensor.chef_iq_cq60_3_tip
+              - sensor.chef_iq_cq60_4_tip
+              - sensor.chef_iq_cq60_ambient
+              - sensor.chef_iq_cq60_2_ambient
+              - sensor.chef_iq_cq60_3_ambient
+              - sensor.chef_iq_cq60_4_ambient
 
 # ============================================================
 # Optional helper: a "hottest probe" template sensor for
@@ -155,10 +163,10 @@ views:
 #         state_class: measurement
 #         state: >
 #           {% set probes = [
-#             states('sensor.chef_iq_cq60_meat_temperature'),
-#             states('sensor.chef_iq_cq60_2_meat_temperature'),
-#             states('sensor.chef_iq_cq60_3_meat_temperature'),
-#             states('sensor.chef_iq_cq60_4_meat_temperature')
+#             states('sensor.chef_iq_cq60_tip'),
+#             states('sensor.chef_iq_cq60_2_tip'),
+#             states('sensor.chef_iq_cq60_3_tip'),
+#             states('sensor.chef_iq_cq60_4_tip')
 #           ] | reject('in', ['unknown', 'unavailable', 'none']) | map('float', 0) | list %}
 #           {{ probes | max if probes else 'unavailable' }}
 # ============================================================
