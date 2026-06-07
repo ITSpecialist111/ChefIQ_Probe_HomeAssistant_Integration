@@ -204,3 +204,75 @@ template:
         state: >
           {% set h = states('sensor.chefiq_collagen_hours')|float(0) %}
           {{ [100*h/12.0, 100]|min|round(0) }}
+
+      # =====================================================================
+      # FOOD SAFETY — the full lifecycle (come-up, hold, cool, master verdict)
+      # ---------------------------------------------------------------------
+      # NOTE: the probe reads ONE point. For intact whole-muscle cuts the
+      # surface is the contaminated/hottest part, so a core reading is
+      # conservative. For GROUND/mechanically-tenderized meat and POULTRY,
+      # pathogens are throughout, so the slowest-heating core is the correct
+      # point — keep the probe in the thickest part. Guidance, not gospel.
+      # =====================================================================
+
+      # ---- Danger-zone / come-up timer (min in 5–54.4 °C this cook) --------
+      # FDA 3-501.19: raw food 5–54.4 °C < 4 h cumulative. Baldwin/Willardsen:
+      # core should reach 54.4 °C within 6 h (C. perfringens). Auto-resets per
+      # cook via the cook-start timestamp.
+      - name: Chef iQ Danger Zone Time
+        unit_of_measurement: min
+        state_class: measurement
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set active = is_state('input_boolean.chefiq_cook_active','on') %}
+          {% set ts = state_attr('input_datetime.chefiq_cook_start','timestamp') %}
+          {% set safe = is_state('sensor.chefiq_safe_to_eat','Pasteurized') %}
+          {% if core is none or not active or ts is none %}0
+          {% elif core >= 54.4 or safe or core < 5 %}0
+          {% else %}{{ ((now().timestamp() - ts)/60)|int }}{% endif %}
+
+      # ---- Hot-hold safety (holding cooked food ≥ 54.4 °C is safe) ---------
+      - name: Chef iQ Hot Hold Safety
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set safe = is_state('sensor.chefiq_safe_to_eat','Pasteurized') %}
+          {% if core is none %}Unknown
+          {% elif not (safe or core >= 54.4) %}Not holding
+          {% elif core >= 54.4 %}Safe to hold ({{ core|round(0) }}°C)
+          {% elif core >= 50 %}Cooling - eat soon ({{ core|round(0) }}°C)
+          {% else %}Out of hot-hold - chill or reheat{% endif %}
+
+      # ---- Rapid-cooling safety (FDA 2-stage: 57→21 °C ≤2 h, →5 °C ≤6 h) ---
+      # Requires helpers input_boolean.chefiq_cooling + input_datetime.chefiq_cool_start,
+      # driven by the cooling automations (see README).
+      - name: Chef iQ Cooling Safety
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set cooling = is_state('input_boolean.chefiq_cooling','on') %}
+          {% set ts = state_attr('input_datetime.chefiq_cool_start','timestamp') %}
+          {% if not cooling or core is none or ts is none %}Not cooling
+          {% else %}{% set mins = ((now().timestamp() - ts)/60)|int %}
+          {% if core <= 5 %}Chilled safely ({{ mins }}m)
+          {% elif mins > 360 %}UNSAFE - too slow ({{ mins }}m)
+          {% elif core > 21 and mins > 120 %}HURRY - past 2h at {{ core|round(0) }}C
+          {% elif mins > 300 %}HURRY - {{ mins }}m, finish chilling
+          {% else %}On track ({{ mins }}m, {{ core|round(0) }}C){% endif %}{% endif %}
+
+      # ---- Master food-safety verdict (single rolled-up status) ------------
+      - name: Chef iQ Food Safety
+        state: >
+          {% set core = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set active = is_state('input_boolean.chefiq_cook_active','on') %}
+          {% set safe = is_state('sensor.chefiq_safe_to_eat','Pasteurized') %}
+          {% set cooling = is_state('input_boolean.chefiq_cooling','on') %}
+          {% set dz = states('sensor.chefiq_danger_zone_time')|float(0) %}
+          {% if core is none %}No probe
+          {% elif cooling %}{{ states('sensor.chefiq_cooling_safety') }}
+          {% elif safe and core >= 54.4 %}✅ Safe · pasteurized & hot
+          {% elif safe %}✅ Pasteurized (now cooling)
+          {% elif core >= 54.4 %}⏳ Pasteurizing · {{ states('sensor.chefiq_pasteurization') }}%
+          {% elif dz >= 240 %}⚠️ Danger zone {{ (dz/60)|round(1) }}h - cook now
+          {% elif dz >= 120 %}⚠️ In zone {{ (dz/60)|round(1) }}h (4h limit)
+          {% elif active and core < 54.4 %}Coming up to temp
+          {% elif core < 5 %}❄️ Cold / chilled
+          {% else %}Idle{% endif %}
