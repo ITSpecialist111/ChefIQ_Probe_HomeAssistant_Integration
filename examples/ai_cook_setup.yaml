@@ -1,0 +1,232 @@
+# =============================================================================
+# Chef iQ — AI Cook Setup (describe your cook → AI configures the probe)
+# =============================================================================
+# Type what you are cooking in plain English ("2.2kg beef brisket, low & slow,
+# fall-apart tender, serving 6pm") and press Apply. An LLM (Mistral) reads it
+# and configures the probe for you — mode, food-safety type, target core temp,
+# carryover offset, pre-alert lead, rest time (and proof hours for dough) — then
+# starts the cook session so the AI Cook Coach (see ai_cook_coach.yaml) begins.
+#
+# WHY: the probe exposes ~15 settable presets. This maps a sentence onto the
+# right ones using real food-safety + cooking-physics rules, so monitoring is
+# exact for THIS cook without you hunting through dropdowns.
+#
+# VALIDATED examples (mistral-medium, temperature 0.2):
+#   "2.2kg brisket, low & slow, fall-apart"  → Intact cut, 93 °C (collagen),
+#                                               rest 60 min  (NOT a doneness preset)
+#   "whole roast chicken, juicy"             → Poultry, 74 °C, rest 15 min
+#   "medium-rare ribeye"                     → Intact cut, 57 °C, preset matched
+#   "pork sausages on the BBQ"               → Ground/tenderized, 71 °C (safe!)
+#   "proofing pizza dough, ready in ~4h"     → Fermenting mode
+#
+# COST: ~1 call per setup, ~600 tokens — fractions of a penny.
+#
+# ── SETUP (shares the same key/secret as the AI Cook Coach) ──────────────────
+# 1. /config/secrets.yaml  (NEVER commit):
+#       chefiq_mistral_bearer: "Bearer YOUR_MISTRAL_API_KEY_HERE"
+# 2. Add the rest_command below to /config/configuration.yaml, then restart HA.
+#    (The helpers + automation + dashboard card can be created in the UI, or are
+#     created for you if you build via the API — see blocks further down.)
+# =============================================================================
+
+rest_command:
+  chefiq_ai_setup:
+    url: https://api.mistral.ai/v1/chat/completions
+    method: POST
+    timeout: 30
+    headers:
+      authorization: !secret chefiq_mistral_bearer
+      content-type: application/json
+    # The "skill": an expert chef + food-safety system prompt that maps free
+    # text onto the probe's exact preset values, returned as strict JSON.
+    # Single-quoted so it never collides with the JSON double-quotes below.
+    payload: >-
+      {% set sys = 'You are an expert chef and food-safety specialist. Read the cook description and return ONLY a JSON object with EXACTLY these keys: probe_mode, meat_type, target_temp_c, carryover_offset_c, pre_alert_lead_c, rest_minutes, proof_target_hours, preset, summary. Allowed probe_mode: Cooking | Fridge | Freezer | Fermenting | Tempering chocolate | Other. Allowed meat_type: Intact cut (steak/roast) | Ground / tenderized | Poultry | Fish | N/A. Allowed preset (use the EXACT string with middle dot and degree sign, or Custom): Custom | Beef · Rare (52°C) | Beef · Medium Rare (57°C) | Beef · Medium (63°C) | Beef · Medium Well (68°C) | Beef · Well Done (74°C) | Chicken · Breast (74°C) | Chicken · Thigh (79°C) | Turkey (74°C) | Pork · Medium (63°C) | Pork · Well (71°C) | Lamb · Medium Rare (57°C) | Lamb · Medium (63°C) | Fish (52°C) | Burger · Medium (71°C) | Sous Vide · Steak (55°C). Food-safety rules: Poultry pull 74C. Ground or tenderized (mince, burgers, sausages) 71C. Intact whole-muscle cuts by doneness. Fish 52 to 63C. When unsure for poultry or pork, choose the safer higher category. Use N/A when it is not a meat cook. target_temp_c is the CORE pull temperature in C. Doneness: beef rare 52, medium-rare 57, medium 63, medium-well 68, well 74. Poultry breast 74, thigh 79. Pork medium 63, well 71. Tough collagen cuts cooked for tenderness (brisket, chuck, pork shoulder, short ribs, lamb shank) 90 to 96C to render collagen. Fish 52 to 63. Honor any explicit temperature the user gives. Clamp 0 to 110. carryover_offset_c: thin or small cuts 1 to 2, medium roasts 3 to 5, large or thick roasts 5 to 8, collagen cuts about 2. pre_alert_lead_c: small or fast cuts 3, large roasts 5 to 8. rest_minutes: steaks 5 to 10, chicken pieces 5 to 10, whole roast or bird 15 to 30, brisket or pork shoulder 30 to 60. Clamp 0 to 60. proof_target_hours: only when Fermenting, the target proof or ferment time in hours implied by the description, else 0. preset: choose the closest exact preset whose meat name matches, otherwise Custom. summary: ONE short friendly sentence giving the plan and the key reason. Be decisive and safe.' %}
+      {
+        "model": "mistral-medium-latest",
+        "temperature": 0.2,
+        "max_tokens": 400,
+        "response_format": {"type": "json_object"},
+        "messages": [
+          {"role": "system", "content": {{ sys | to_json }} },
+          {"role": "user", "content": {{ states('input_text.chef_iq_cook_request') | to_json }} }
+        ]
+      }
+
+# ── Helpers (created in the UI or via the API) ───────────────────────────────
+input_text:
+  chef_iq_cook_request:
+    name: Chef iQ Cook Request
+    max: 255
+    icon: mdi:text-box-edit
+  chef_iq_cook_plan:
+    name: Chef iQ Cook Plan
+    max: 255
+    icon: mdi:clipboard-check-outline
+
+input_button:
+  chef_iq_cook_setup:
+    name: Chef iQ Cook Setup
+    icon: mdi:robot-excited
+
+# ── The setup automation (Automations editor → edit in YAML) ─────────────────
+automation:
+  - id: chefiq_ai_cook_setup
+    alias: "ChefIQ · AI Cook Setup"
+    description: >-
+      Describe your cook in plain English; AI sets the probe mode, meat-safety
+      type, target temp, carryover, pre-alert, rest and proof presets, then
+      starts the session.
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_button.chef_iq_cook_setup
+    conditions: []
+    actions:
+      - condition: template
+        value_template: "{{ states('input_text.chef_iq_cook_request') | trim | length > 2 }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.chef_iq_cook_plan
+        data:
+          value: "🤔 Asking the AI to plan your cook…"
+      - action: rest_command.chefiq_ai_setup
+        response_variable: r
+        continue_on_error: true
+      - variables:
+          raw: >-
+            {{ (r.content.choices[0].message.content | default('')) if (r is defined and r.content is defined) else '' }}
+      - variables:
+          data: "{{ (raw | from_json) if raw[:1] == '{' else {} }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ data.probe_mode is defined }}"
+            sequence:
+              - variables:
+                  modes: ["Cooking", "Fridge", "Freezer", "Fermenting", "Tempering chocolate", "Other"]
+                  meats: ["Intact cut (steak/roast)", "Ground / tenderized", "Poultry", "Fish"]
+                  mode_v: "{{ data.probe_mode if data.probe_mode in modes else 'Other' }}"
+                  meat_v: "{{ data.meat_type if data.meat_type in meats else '' }}"
+                  tgt: "{{ data.target_temp_c | float(0) }}"
+                  carry: "{{ data.carryover_offset_c | float(0) }}"
+                  lead: "{{ data.pre_alert_lead_c | float(3) }}"
+                  restm: "{{ data.rest_minutes | float(0) }}"
+                  proofh: "{{ (data.proof_target_hours | float(0)) if data.proof_target_hours is defined else 0 }}"
+                  plan_txt: "{{ (data.summary | default('Cook configured.'))[:255] }}"
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.chef_iq_probe_mode
+                data:
+                  option: "{{ mode_v }}"
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.chefiq_preset
+                data:
+                  option: "Custom"
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.chef_iq_carryover_offset
+                data:
+                  value: "{{ [[carry,10]|min,0]|max }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.chef_iq_pre_alert_lead
+                data:
+                  value: "{{ [[lead,15]|min,1]|max }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.chef_iq_rest_minutes
+                data:
+                  value: "{{ [[restm,60]|min,0]|max }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ mode_v == 'Cooking' and meat_v != '' }}"
+                then:
+                  - action: input_select.select_option
+                    target:
+                      entity_id: input_select.chef_iq_meat_type
+                    data:
+                      option: "{{ meat_v }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ mode_v == 'Cooking' and tgt >= 20 }}"
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.chefiq_target_temperature
+                    data:
+                      value: "{{ [[tgt,110]|min,20]|max }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ mode_v == 'Fermenting' and proofh > 0 }}"
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.chef_iq_proof_target_hours
+                    data:
+                      value: "{{ [[proofh,72]|min,1]|max }}"
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.chef_iq_cook_plan
+                data:
+                  value: "{{ plan_txt }}"
+              # Start the cook session (so the AI Cook Coach begins) + re-arm alerts.
+              - if:
+                  - condition: template
+                    value_template: "{{ mode_v == 'Cooking' }}"
+                then:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.chefiq_cook_active
+                  - action: input_datetime.set_datetime
+                    target:
+                      entity_id: input_datetime.chefiq_cook_start
+                    data:
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id:
+                        - input_boolean.chefiq_alert_sent
+                        - input_boolean.chef_iq_pre_alert_sent
+                        - input_boolean.chef_iq_resting
+                        - input_boolean.chef_iq_cooling
+                        - input_boolean.chef_iq_stall_notified
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.chef_iq_ai_announce
+                    state: "on"
+                then:
+                  - action: script.chefiq_kitchen_announce
+                    data:
+                      message: "{{ plan_txt }}"
+                      volume: 38
+        default:
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.chef_iq_cook_plan
+            data:
+              value: "⚠️ Could not configure (AI offline or request unclear). Check the rest_command + secret are added, then retry."
+
+# ── Dashboard card (Lovelace) ────────────────────────────────────────────────
+# Add near the top of your ChefIQ view:
+#
+# type: vertical-stack
+# cards:
+#   - type: markdown
+#     content: >
+#       ### 🧑‍🍳 AI Cook Setup
+#       Describe what you are cooking, then press **Apply**. The AI sets the probe
+#       mode, food-safety type, target temp, carryover, pre-alert and rest, then
+#       starts the cook.
+#
+#       **Plan:** {{ states('input_text.chef_iq_cook_plan') }}
+#   - type: entities
+#     show_header_toggle: false
+#     entities:
+#       - entity: input_text.chef_iq_cook_request
+#         name: What are you cooking?
+#         icon: mdi:text-box-edit
+#       - entity: input_button.chef_iq_cook_setup
+#         name: Apply with AI
+#         icon: mdi:robot-excited

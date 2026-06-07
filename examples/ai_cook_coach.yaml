@@ -79,15 +79,31 @@ input_datetime:
 automation:
   - id: chefiq_ai_coach_poll
     alias: "ChefIQ · AI Coach (5 min)"
-    description: Poll the LLM every 5 minutes during a cook for an expert insight.
+    description: Poll the LLM every 5 min ONLY while actively cooking (skips rest/idle to save tokens).
     mode: single
     triggers:
       - trigger: time_pattern
         minutes: "/5"
     conditions:
+      # Only poll while ACTIVELY cooking, so we never burn tokens during rest/idle.
       - condition: state
         entity_id: input_boolean.chefiq_cook_active
         state: "on"
+      - condition: state
+        entity_id: input_boolean.chef_iq_resting
+        state: "off"
+      - condition: state
+        entity_id: input_boolean.chef_iq_cooling
+        state: "off"
+      # Probe connected AND heat still being applied (core still rising, OR
+      # oven/ambient at least 5 °C hotter than the core). When you pull the food,
+      # the rate falls to ~0 and ambient drops below the core, so polling stops.
+      - condition: template
+        value_template: >-
+          {% set core = states('sensor.chefiq_meat_temperature')|float(-999) %}
+          {% set amb  = states('sensor.chefiq_ambient_temperature')|float(-999) %}
+          {% set rate = states('sensor.chefiq_meat_rate')|float(0) %}
+          {{ core > -50 and (rate >= 0.1 or (amb - core) >= 5) }}
     actions:
       - action: rest_command.chefiq_ai_coach
         response_variable: ai
