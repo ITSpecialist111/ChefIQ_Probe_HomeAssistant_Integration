@@ -1,8 +1,8 @@
 # =============================================================================
-# Chef iQ — AI Cook Coach (Mistral, 5-minute poll)
+# Chef iQ — AI Cook Coach (5-minute poll, powered by HA AI Task)
 # =============================================================================
-# Every 5 minutes during a cook, sends the live sensor + derived-intelligence
-# state to an LLM (Mistral) and gets back ONE short, expert, natural-language
+# Every 5 minutes DURING AN ACTIVE COOK, sends the live sensor + derived-
+# intelligence state to an LLM and gets back ONE short, expert, natural-language
 # insight ("safe and done — pull it now to rest; juiciness dropping"). The
 # insight is stored in input_text.chef_iq_ai_coach and shown on the dashboard;
 # optionally announced on the kitchen Sonos.
@@ -12,50 +12,18 @@
 # facts into a single prioritised, human judgement call — the bit that's hard
 # to express in Jinja.
 #
-# COST: ~330 tokens/poll on mistral-medium — fractions of a penny per cook.
+# ✨ ZERO CONFIG FILE EDIT: this uses Home Assistant's built-in **AI Task**
+# (ai_task.generate_data), so it works with whatever AI Task provider you have
+# configured (OpenAI, Anthropic, Google, Ollama, …). No rest_command, no API
+# key in YAML, no restart. Just create the helpers + automation (all do-able in
+# the UI). Set the entity_id below to YOUR ai_task entity.
 #
-# ── SETUP (2 steps, via Studio Code Server / File editor) ───────────────────
-# 1. Add your key to  /config/secrets.yaml  (NEVER commit this):
-#       chefiq_mistral_bearer: "Bearer YOUR_MISTRAL_API_KEY_HERE"
-# 2. Add the rest_command below to  /config/configuration.yaml , then restart.
+# COST: ~1 small call per 5 min while cooking — fractions of a penny per cook.
+# It only polls while actively cooking, so rest/idle cost nothing (see conditions).
 #
-# The input_text/input_datetime/input_boolean helpers and the polling
-# automation can be created in the UI (Settings → Devices & Services → Helpers
-# and the Automation editor) — see the automation at the bottom.
+# (Prefer an external provider like Mistral instead of AI Task? See the
+#  "ALTERNATIVE" block at the very bottom of this file.)
 # =============================================================================
-
-rest_command:
-  chefiq_ai_coach:
-    url: https://api.mistral.ai/v1/chat/completions
-    method: POST
-    timeout: 30
-    headers:
-      authorization: !secret chefiq_mistral_bearer
-      content-type: application/json
-    # The cook context is assembled from the sensors and safely JSON-escaped
-    # with | to_json. Edit the entity names if yours differ.
-    payload: >-
-      {
-        "model": "mistral-medium-latest",
-        "temperature": 0.4,
-        "max_tokens": 120,
-        "messages": [
-          {"role": "system", "content": "You are a concise expert cooking assistant monitoring a smart meat probe. Give ONE short, friendly, actionable insight (max 2 sentences). Be specific about food safety and doneness, use the data, never invent numbers. If the food is done and safe, say so and advise the next step (rest or pull). Add judgement; do not just repeat numbers the user can already see."},
-          {"role": "user", "content": {{
-              ("Live cook data (Celsius). Mode: " ~ states('input_select.chef_iq_probe_mode')
-              ~ ", Meat type: " ~ states('input_select.chef_iq_meat_type')
-              ~ ", Core: " ~ states('sensor.chefiq_meat_temperature')
-              ~ ", Oven/ambient: " ~ states('sensor.chefiq_ambient_temperature')
-              ~ ", Rate C/min: " ~ states('sensor.chefiq_meat_rate')
-              ~ ", Target: " ~ states('input_number.chefiq_target_temperature')
-              ~ ", Pasteurization %: " ~ states('sensor.chef_iq_pasteurization')
-              ~ ", Food safety: " ~ states('sensor.chef_iq_food_safety')
-              ~ ", Phase: " ~ states('sensor.chef_iq_cook_phase')
-              ~ ", Juiciness %: " ~ states('sensor.chef_iq_juiciness')
-              ~ ", Predicted final: " ~ states('sensor.chef_iq_predicted_final_temp')
-              ) | to_json }} }
-        ]
-      }
 
 # ── Helpers (or create in the UI) ────────────────────────────────────────────
 input_text:
@@ -105,12 +73,41 @@ automation:
           {% set rate = states('sensor.chefiq_meat_rate')|float(0) %}
           {{ core > -50 and (rate >= 0.1 or (amb - core) >= 5) }}
     actions:
-      - action: rest_command.chefiq_ai_coach
-        response_variable: ai
+      # HA AI Task with a single structured "insight" field. Change the
+      # entity_id to YOUR ai_task entity (Developer Tools → States → ai_task.*).
+      - action: ai_task.generate_data
         continue_on_error: true
+        response_variable: out
+        data:
+          entity_id: ai_task.openai_ai_task_3
+          task_name: ChefIQ Cook Coach
+          instructions: >-
+            You are a concise expert cooking assistant monitoring a smart meat
+            probe. Give ONE short, friendly, actionable insight (max 2
+            sentences). Be specific about food safety and doneness, use the
+            data, never invent numbers. If the food is done and safe, say so
+            and advise the next step (rest or pull). Add judgement; do not just
+            repeat numbers the user can already see.
+
+            Live cook data (Celsius). Mode: {{ states('input_select.chef_iq_probe_mode') }},
+            Meat type: {{ states('input_select.chef_iq_meat_type') }},
+            Core: {{ states('sensor.chefiq_meat_temperature') }},
+            Oven/ambient: {{ states('sensor.chefiq_ambient_temperature') }},
+            Rate C/min: {{ states('sensor.chefiq_meat_rate') }},
+            Target: {{ states('input_number.chefiq_target_temperature') }},
+            Pasteurization %: {{ states('sensor.chef_iq_pasteurization') }},
+            Food safety: {{ states('sensor.chef_iq_food_safety') }},
+            Phase: {{ states('sensor.chef_iq_cook_phase') }},
+            Juiciness %: {{ states('sensor.chef_iq_juiciness') }},
+            Predicted final: {{ states('sensor.chef_iq_predicted_final_temp') }}
+          structure:
+            insight:
+              description: One short expert insight, max 2 sentences
+              selector:
+                text:
       - variables:
           insight: >-
-            {{ (ai.content.choices[0].message.content | default('')) if (ai is defined and ai.content is defined) else '' }}
+            {{ out.data.insight | default('') if (out is defined and out.data is defined and out.data is mapping) else '' }}
       - condition: template
         value_template: "{{ insight | length > 3 }}"
       - action: input_text.set_value
@@ -132,3 +129,44 @@ automation:
             data:
               message: "{{ insight }}"
               volume: 38
+
+# =============================================================================
+# ALTERNATIVE — use an external LLM provider (e.g. Mistral) via rest_command
+# instead of HA AI Task. Add your key to /config/secrets.yaml (never commit):
+#   chefiq_mistral_bearer: "Bearer YOUR_MISTRAL_API_KEY_HERE"
+# add this rest_command to /config/configuration.yaml, restart, then in the
+# automation above replace the ai_task.generate_data step with a call to
+# rest_command.chefiq_ai_coach (response_variable: ai) and read the insight from
+# {{ ai.content.choices[0].message.content }}.
+# -----------------------------------------------------------------------------
+# rest_command:
+#   chefiq_ai_coach:
+#     url: https://api.mistral.ai/v1/chat/completions
+#     method: POST
+#     timeout: 30
+#     headers:
+#       authorization: !secret chefiq_mistral_bearer
+#       content-type: application/json
+#     payload: >-
+#       {
+#         "model": "mistral-medium-latest",
+#         "temperature": 0.4,
+#         "max_tokens": 120,
+#         "messages": [
+#           {"role": "system", "content": "You are a concise expert cooking assistant monitoring a smart meat probe. Give ONE short, friendly, actionable insight (max 2 sentences). Be specific about food safety and doneness, use the data, never invent numbers. If the food is done and safe, say so and advise the next step. Add judgement; do not just repeat numbers."},
+#           {"role": "user", "content": {{
+#               ("Live cook data (Celsius). Mode: " ~ states('input_select.chef_iq_probe_mode')
+#               ~ ", Meat type: " ~ states('input_select.chef_iq_meat_type')
+#               ~ ", Core: " ~ states('sensor.chefiq_meat_temperature')
+#               ~ ", Oven/ambient: " ~ states('sensor.chefiq_ambient_temperature')
+#               ~ ", Rate C/min: " ~ states('sensor.chefiq_meat_rate')
+#               ~ ", Target: " ~ states('input_number.chefiq_target_temperature')
+#               ~ ", Pasteurization %: " ~ states('sensor.chef_iq_pasteurization')
+#               ~ ", Food safety: " ~ states('sensor.chef_iq_food_safety')
+#               ~ ", Phase: " ~ states('sensor.chef_iq_cook_phase')
+#               ~ ", Juiciness %: " ~ states('sensor.chef_iq_juiciness')
+#               ~ ", Predicted final: " ~ states('sensor.chef_iq_predicted_final_temp')
+#               ) | to_json }} }
+#         ]
+#       }
+# =============================================================================

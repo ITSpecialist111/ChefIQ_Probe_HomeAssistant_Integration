@@ -1,9 +1,9 @@
 # =============================================================================
-# Chef iQ — AI Cook Setup (describe your cook → AI configures the probe)
+# Chef iQ — AI Cook Setup + Session lifecycle (powered by HA AI Task)
 # =============================================================================
 # Type what you are cooking in plain English ("2.2kg beef brisket, low & slow,
-# fall-apart tender, serving 6pm") and press Apply. An LLM (Mistral) reads it
-# and configures the probe for you — mode, food-safety type, target core temp,
+# fall-apart tender, serving 6pm") and press Apply. An LLM reads it and
+# configures the probe for you — mode, food-safety type, target core temp,
 # carryover offset, pre-alert lead, rest time (and proof hours for dough) — then
 # starts the cook session so the AI Cook Coach (see ai_cook_coach.yaml) begins.
 #
@@ -11,47 +11,25 @@
 # right ones using real food-safety + cooking-physics rules, so monitoring is
 # exact for THIS cook without you hunting through dropdowns.
 #
-# VALIDATED examples (mistral-medium, temperature 0.2):
-#   "2.2kg brisket, low & slow, fall-apart"  → Intact cut, 93 °C (collagen),
-#                                               rest 60 min  (NOT a doneness preset)
+# ✨ ZERO CONFIG FILE EDIT: this uses Home Assistant's built-in **AI Task**
+# (ai_task.generate_data) with a structured schema, so the model is forced to
+# return valid presets — no rest_command, no API key in YAML, no restart. Works
+# with whatever AI Task provider you have (OpenAI, Anthropic, Google, Ollama…).
+# Set the entity_id in the automation to YOUR ai_task entity.
+#
+# VALIDATED live examples:
+#   "2.2kg brisket, low & slow, fall-apart"  → Intact cut, 90 °C (collagen),
+#                                               rest 30 min  (NOT a doneness preset)
 #   "whole roast chicken, juicy"             → Poultry, 74 °C, rest 15 min
 #   "medium-rare ribeye"                     → Intact cut, 57 °C, preset matched
 #   "pork sausages on the BBQ"               → Ground/tenderized, 71 °C (safe!)
-#   "proofing pizza dough, ready in ~4h"     → Fermenting mode
+#   "proofing pizza dough, ready in ~4h"     → Fermenting mode, 4 proof hours
 #
-# COST: ~1 call per setup, ~600 tokens — fractions of a penny.
+# COST: ~1 call per setup — fractions of a penny.
 #
-# ── SETUP (shares the same key/secret as the AI Cook Coach) ──────────────────
-# 1. /config/secrets.yaml  (NEVER commit):
-#       chefiq_mistral_bearer: "Bearer YOUR_MISTRAL_API_KEY_HERE"
-# 2. Add the rest_command below to /config/configuration.yaml, then restart HA.
-#    (The helpers + automation + dashboard card can be created in the UI, or are
-#     created for you if you build via the API — see blocks further down.)
+# (Prefer an external provider like Mistral instead of AI Task? See the
+#  "ALTERNATIVE" block at the very bottom of this file.)
 # =============================================================================
-
-rest_command:
-  chefiq_ai_setup:
-    url: https://api.mistral.ai/v1/chat/completions
-    method: POST
-    timeout: 30
-    headers:
-      authorization: !secret chefiq_mistral_bearer
-      content-type: application/json
-    # The "skill": an expert chef + food-safety system prompt that maps free
-    # text onto the probe's exact preset values, returned as strict JSON.
-    # Single-quoted so it never collides with the JSON double-quotes below.
-    payload: >-
-      {% set sys = 'You are an expert chef and food-safety specialist. Read the cook description and return ONLY a JSON object with EXACTLY these keys: probe_mode, meat_type, target_temp_c, carryover_offset_c, pre_alert_lead_c, rest_minutes, proof_target_hours, preset, summary. Allowed probe_mode: Cooking | Fridge | Freezer | Fermenting | Tempering chocolate | Other. Allowed meat_type: Intact cut (steak/roast) | Ground / tenderized | Poultry | Fish | N/A. Allowed preset (use the EXACT string with middle dot and degree sign, or Custom): Custom | Beef · Rare (52°C) | Beef · Medium Rare (57°C) | Beef · Medium (63°C) | Beef · Medium Well (68°C) | Beef · Well Done (74°C) | Chicken · Breast (74°C) | Chicken · Thigh (79°C) | Turkey (74°C) | Pork · Medium (63°C) | Pork · Well (71°C) | Lamb · Medium Rare (57°C) | Lamb · Medium (63°C) | Fish (52°C) | Burger · Medium (71°C) | Sous Vide · Steak (55°C). Food-safety rules: Poultry pull 74C. Ground or tenderized (mince, burgers, sausages) 71C. Intact whole-muscle cuts by doneness. Fish 52 to 63C. When unsure for poultry or pork, choose the safer higher category. Use N/A when it is not a meat cook. target_temp_c is the CORE pull temperature in C. Doneness: beef rare 52, medium-rare 57, medium 63, medium-well 68, well 74. Poultry breast 74, thigh 79. Pork medium 63, well 71. Tough collagen cuts cooked for tenderness (brisket, chuck, pork shoulder, short ribs, lamb shank) 90 to 96C to render collagen. Fish 52 to 63. Honor any explicit temperature the user gives. Clamp 0 to 110. carryover_offset_c: thin or small cuts 1 to 2, medium roasts 3 to 5, large or thick roasts 5 to 8, collagen cuts about 2. pre_alert_lead_c: small or fast cuts 3, large roasts 5 to 8. rest_minutes: steaks 5 to 10, chicken pieces 5 to 10, whole roast or bird 15 to 30, brisket or pork shoulder 30 to 60. Clamp 0 to 60. proof_target_hours: only when Fermenting, the target proof or ferment time in hours implied by the description, else 0. preset: choose the closest exact preset whose meat name matches, otherwise Custom. summary: ONE short friendly sentence giving the plan and the key reason. Be decisive and safe.' %}
-      {
-        "model": "mistral-medium-latest",
-        "temperature": 0.2,
-        "max_tokens": 400,
-        "response_format": {"type": "json_object"},
-        "messages": [
-          {"role": "system", "content": {{ sys | to_json }} },
-          {"role": "user", "content": {{ states('input_text.chef_iq_cook_request') | to_json }} }
-        ]
-      }
 
 # ── Helpers (created in the UI or via the API) ───────────────────────────────
 input_text:
@@ -68,15 +46,20 @@ input_button:
   chef_iq_cook_setup:
     name: Chef iQ Cook Setup
     icon: mdi:robot-excited
+  chef_iq_cook_end:           # the "End cook session" button
+    name: Chef iQ Cook End
+    icon: mdi:stop-circle-outline
 
-# ── The setup automation (Automations editor → edit in YAML) ─────────────────
+# ── 1) The setup automation (Automations editor → edit in YAML) ──────────────
+#    Change the entity_id below to YOUR ai_task entity
+#    (Developer Tools → States → filter "ai_task.").
 automation:
   - id: chefiq_ai_cook_setup
     alias: "ChefIQ · AI Cook Setup"
     description: >-
-      Describe your cook in plain English; AI sets the probe mode, meat-safety
-      type, target temp, carryover, pre-alert, rest and proof presets, then
-      starts the session.
+      Describe your cook in plain English; AI (HA AI Task) sets the probe mode,
+      meat-safety type, target temp, carryover, pre-alert, rest and proof
+      presets, then starts the session. No config paste needed.
     mode: single
     triggers:
       - trigger: state
@@ -90,100 +73,160 @@ automation:
           entity_id: input_text.chef_iq_cook_plan
         data:
           value: "🤔 Asking the AI to plan your cook…"
-      - action: rest_command.chefiq_ai_setup
-        response_variable: r
+      - action: ai_task.generate_data
         continue_on_error: true
+        response_variable: out
+        data:
+          entity_id: ai_task.openai_ai_task_3
+          task_name: ChefIQ Cook Setup
+          instructions: >-
+            You are an expert chef and food-safety specialist configuring a
+            Bluetooth meat-probe monitor from a free-text description.
+            Food-safety rules: Poultry pull 74C; Ground or tenderized (mince,
+            burgers, sausages) 71C; Intact whole-muscle cuts by doneness; Fish
+            52-63C; if unsure for poultry/pork choose the SAFER higher category;
+            meat_type = N/A if not a meat cook. target_temp_c = CORE pull
+            temperature in C. Doneness: beef rare 52, medium-rare 57, medium 63,
+            medium-well 68, well 74; poultry breast 74, thigh 79; pork medium
+            63, well 71; tough collagen cuts cooked for tenderness (brisket,
+            chuck, pork shoulder, short ribs, lamb shank) 90-96C to render
+            collagen; fish 52-63. Honor any explicit temperature the user gives.
+            Clamp 0-110. carryover_offset_c: thin/small 1-2, medium roasts 3-5,
+            large/thick 5-8, collagen cuts ~2. pre_alert_lead_c: small/fast 3,
+            large roasts 5-8. rest_minutes: steaks 5-10, chicken pieces 5-10,
+            whole roast or bird 15-30, brisket or pork shoulder 30-60 (clamp
+            0-60). proof_target_hours: only when probe_mode is Fermenting, the
+            target proof/ferment time in hours implied by the description, else
+            0. preset: choose the closest EXACT preset string whose meat name
+            matches, otherwise Custom. summary: ONE short friendly sentence
+            giving the plan and the key reason (safety or texture). Be decisive
+            and safe.
+
+            User request: {{ states('input_text.chef_iq_cook_request') }}
+          structure:
+            probe_mode:
+              description: Best-fit probe mode
+              selector:
+                select:
+                  options: ["Cooking", "Fridge", "Freezer", "Fermenting", "Tempering chocolate", "Other"]
+            meat_type:
+              description: Food-safety category or N/A
+              selector:
+                select:
+                  options: ["Intact cut (steak/roast)", "Ground / tenderized", "Poultry", "Fish", "N/A"]
+            target_temp_c:
+              description: Core pull temp C, 0 if not a temperature cook
+              selector:
+                number: { min: 0, max: 110 }
+            carryover_offset_c:
+              description: Expected carryover rise C
+              selector:
+                number: { min: 0, max: 10 }
+            pre_alert_lead_c:
+              description: Degrees before target to pre-alert
+              selector:
+                number: { min: 1, max: 15 }
+            rest_minutes:
+              description: Rest time minutes
+              selector:
+                number: { min: 0, max: 60 }
+            proof_target_hours:
+              description: Proof/ferment target hours, else 0
+              selector:
+                number: { min: 0, max: 72 }
+            preset:
+              description: Closest exact preset or Custom
+              selector:
+                select:
+                  options:
+                    - "Custom"
+                    - "Beef · Rare (52°C)"
+                    - "Beef · Medium Rare (57°C)"
+                    - "Beef · Medium (63°C)"
+                    - "Beef · Medium Well (68°C)"
+                    - "Beef · Well Done (74°C)"
+                    - "Chicken · Breast (74°C)"
+                    - "Chicken · Thigh (79°C)"
+                    - "Turkey (74°C)"
+                    - "Pork · Medium (63°C)"
+                    - "Pork · Well (71°C)"
+                    - "Lamb · Medium Rare (57°C)"
+                    - "Lamb · Medium (63°C)"
+                    - "Fish (52°C)"
+                    - "Burger · Medium (71°C)"
+                    - "Sous Vide · Steak (55°C)"
+            summary:
+              description: One short friendly sentence
+              selector:
+                text:
+      # ai_task.generate_data returns the structured dict directly in out.data.
       - variables:
-          raw: >-
-            {{ (r.content.choices[0].message.content | default('')) if (r is defined and r.content is defined) else '' }}
-      - variables:
-          data: "{{ (raw | from_json) if raw[:1] == '{' else {} }}"
+          data: "{{ out.data if (out is defined and out.data is defined and out.data is mapping) else {} }}"
       - choose:
           - conditions:
               - condition: template
                 value_template: "{{ data.probe_mode is defined }}"
             sequence:
+              # NOTE: inline the allowed-value lists in each template. (Sibling
+              # variables in the same block are NOT guaranteed to be defined yet.)
               - variables:
-                  modes: ["Cooking", "Fridge", "Freezer", "Fermenting", "Tempering chocolate", "Other"]
-                  meats: ["Intact cut (steak/roast)", "Ground / tenderized", "Poultry", "Fish"]
-                  mode_v: "{{ data.probe_mode if data.probe_mode in modes else 'Other' }}"
-                  meat_v: "{{ data.meat_type if data.meat_type in meats else '' }}"
+                  mode_v: "{{ data.probe_mode if data.probe_mode in ['Cooking','Fridge','Freezer','Fermenting','Tempering chocolate','Other'] else 'Other' }}"
+                  meat_v: "{{ data.meat_type if data.meat_type in ['Intact cut (steak/roast)','Ground / tenderized','Poultry','Fish'] else '' }}"
                   tgt: "{{ data.target_temp_c | float(0) }}"
                   carry: "{{ data.carryover_offset_c | float(0) }}"
                   lead: "{{ data.pre_alert_lead_c | float(3) }}"
                   restm: "{{ data.rest_minutes | float(0) }}"
-                  proofh: "{{ (data.proof_target_hours | float(0)) if data.proof_target_hours is defined else 0 }}"
+                  proofh: "{{ data.proof_target_hours | float(0) }}"
                   plan_txt: "{{ (data.summary | default('Cook configured.'))[:255] }}"
               - action: input_select.select_option
-                target:
-                  entity_id: input_select.chef_iq_probe_mode
-                data:
-                  option: "{{ mode_v }}"
+                target: { entity_id: input_select.chef_iq_probe_mode }
+                data: { option: "{{ mode_v }}" }
               - action: input_select.select_option
-                target:
-                  entity_id: input_select.chefiq_preset
-                data:
-                  option: "Custom"
+                target: { entity_id: input_select.chefiq_preset }
+                data: { option: "Custom" }
               - action: input_number.set_value
-                target:
-                  entity_id: input_number.chef_iq_carryover_offset
-                data:
-                  value: "{{ [[carry,10]|min,0]|max }}"
+                target: { entity_id: input_number.chef_iq_carryover_offset }
+                data: { value: "{{ [[carry,10]|min,0]|max }}" }
               - action: input_number.set_value
-                target:
-                  entity_id: input_number.chef_iq_pre_alert_lead
-                data:
-                  value: "{{ [[lead,15]|min,1]|max }}"
+                target: { entity_id: input_number.chef_iq_pre_alert_lead }
+                data: { value: "{{ [[lead,15]|min,1]|max }}" }
               - action: input_number.set_value
-                target:
-                  entity_id: input_number.chef_iq_rest_minutes
-                data:
-                  value: "{{ [[restm,60]|min,0]|max }}"
+                target: { entity_id: input_number.chef_iq_rest_minutes }
+                data: { value: "{{ [[restm,60]|min,0]|max }}" }
               - if:
                   - condition: template
                     value_template: "{{ mode_v == 'Cooking' and meat_v != '' }}"
                 then:
                   - action: input_select.select_option
-                    target:
-                      entity_id: input_select.chef_iq_meat_type
-                    data:
-                      option: "{{ meat_v }}"
+                    target: { entity_id: input_select.chef_iq_meat_type }
+                    data: { option: "{{ meat_v }}" }
               - if:
                   - condition: template
                     value_template: "{{ mode_v == 'Cooking' and tgt >= 20 }}"
                 then:
                   - action: input_number.set_value
-                    target:
-                      entity_id: input_number.chefiq_target_temperature
-                    data:
-                      value: "{{ [[tgt,110]|min,20]|max }}"
+                    target: { entity_id: input_number.chefiq_target_temperature }
+                    data: { value: "{{ [[tgt,110]|min,20]|max }}" }
               - if:
                   - condition: template
                     value_template: "{{ mode_v == 'Fermenting' and proofh > 0 }}"
                 then:
                   - action: input_number.set_value
-                    target:
-                      entity_id: input_number.chef_iq_proof_target_hours
-                    data:
-                      value: "{{ [[proofh,72]|min,1]|max }}"
+                    target: { entity_id: input_number.chef_iq_proof_target_hours }
+                    data: { value: "{{ [[proofh,72]|min,1]|max }}" }
               - action: input_text.set_value
-                target:
-                  entity_id: input_text.chef_iq_cook_plan
-                data:
-                  value: "{{ plan_txt }}"
+                target: { entity_id: input_text.chef_iq_cook_plan }
+                data: { value: "{{ plan_txt }}" }
               # Start the cook session (so the AI Cook Coach begins) + re-arm alerts.
               - if:
                   - condition: template
                     value_template: "{{ mode_v == 'Cooking' }}"
                 then:
                   - action: input_boolean.turn_on
-                    target:
-                      entity_id: input_boolean.chefiq_cook_active
+                    target: { entity_id: input_boolean.chefiq_cook_active }
                   - action: input_datetime.set_datetime
-                    target:
-                      entity_id: input_datetime.chefiq_cook_start
-                    data:
-                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                    target: { entity_id: input_datetime.chefiq_cook_start }
+                    data: { datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}" }
                   - action: input_boolean.turn_off
                     target:
                       entity_id:
@@ -198,15 +241,90 @@ automation:
                     state: "on"
                 then:
                   - action: script.chefiq_kitchen_announce
-                    data:
-                      message: "{{ plan_txt }}"
-                      volume: 38
+                    data: { message: "{{ plan_txt }}", volume: 38 }
         default:
           - action: input_text.set_value
-            target:
-              entity_id: input_text.chef_iq_cook_plan
+            target: { entity_id: input_text.chef_iq_cook_plan }
             data:
-              value: "⚠️ Could not configure (AI offline or request unclear). Check the rest_command + secret are added, then retry."
+              value: "⚠️ Could not configure - the AI did not respond. Try rephrasing, or check the AI Task integration."
+
+  # ── 2) End the session manually (the "End cook session" button) ────────────
+  - id: chefiq_cook_end
+    alias: "ChefIQ · End Cook Session"
+    description: Manually end the cook session — stops the timer, clears flags, stops the AI coach polling.
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_button.chef_iq_cook_end
+    conditions: []
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.chefiq_cook_active
+            - input_boolean.chefiq_alert_sent
+            - input_boolean.chef_iq_pre_alert_sent
+            - input_boolean.chef_iq_resting
+            - input_boolean.chef_iq_cooling
+            - input_boolean.chef_iq_stall_notified
+      - action: input_text.set_value
+        target: { entity_id: input_text.chef_iq_cook_plan }
+        data: { value: "✅ Cook session ended. Describe your next cook above to start again." }
+      - if:
+          - condition: state
+            entity_id: input_boolean.chef_iq_ai_announce
+            state: "on"
+        then:
+          - action: script.chefiq_kitchen_announce
+            data: { message: "Cook session ended.", volume: 34 }
+
+  # ── 3) Auto-end the session (cooldown / offline / settled-idle) ────────────
+  #    Stops the timer (and therefore the AI coach) so you never burn tokens on
+  #    a finished cook you forgot to end. Three independent triggers:
+  #      • cooling  — core dropping fast (rate < -2 °C/min for 2 min): pulled.
+  #      • offline  — probe unavailable for 15 min: battery out / out of range.
+  #      • idle     — core sat below 30 °C for 30 min: cooled to room temp.
+  #    (Hot BBQ stalls sit at ~70 °C so they never trip the idle path.)
+  - id: chefiq_auto_stop
+    alias: "ChefIQ · Auto-stop Cook"
+    description: Stop cook when probe is pulled/cools rapidly, settles at room temp (idle), or goes offline.
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.chefiq_meat_rate
+        below: -2
+        for: { minutes: 2 }
+        id: cooling
+      - trigger: state
+        entity_id: sensor.chefiq_meat_temperature
+        to: ["unavailable", "unknown"]
+        for: { minutes: 15 }
+        id: offline
+      - trigger: numeric_state
+        entity_id: sensor.chefiq_meat_temperature
+        below: 30
+        for: { minutes: 30 }
+        id: idle
+    conditions:
+      - condition: state
+        entity_id: input_boolean.chefiq_cook_active
+        state: "on"
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.chefiq_cook_active
+            - input_boolean.chefiq_alert_sent
+            - input_boolean.chef_iq_pre_alert_sent
+            - input_boolean.chef_iq_stall_notified
+      - variables:
+          reason: >-
+            {{ {'cooling':'probe pulled / cooling fast','offline':'probe went offline','idle':'probe sat at room temp for 30 min'}.get(trigger.id, 'cook finished') }}
+      - action: notify.mobile_app_sm_f936b   # change to your mobile_app target
+        data:
+          title: "✅ Chef iQ — Cook ended"
+          message: "Cook timer stopped automatically ({{ reason }}). The AI coach has stopped."
+          data: { tag: chefiq_cook, group: chefiq }
 
 # ── Dashboard card (Lovelace) ────────────────────────────────────────────────
 # Add near the top of your ChefIQ view:
@@ -230,3 +348,37 @@ automation:
 #       - entity: input_button.chef_iq_cook_setup
 #         name: Apply with AI
 #         icon: mdi:robot-excited
+#       - entity: input_button.chef_iq_cook_end
+#         name: End cook session
+#         icon: mdi:stop-circle-outline
+
+# =============================================================================
+# ALTERNATIVE — use an external LLM provider (e.g. Mistral) via rest_command
+# instead of HA AI Task. Add your key to /config/secrets.yaml (never commit):
+#   chefiq_mistral_bearer: "Bearer YOUR_MISTRAL_API_KEY_HERE"
+# add this rest_command to /config/configuration.yaml, restart, then in the
+# setup automation replace the ai_task.generate_data step with a call to
+# rest_command.chefiq_ai_setup (response_variable: r) and parse the JSON:
+#   data: "{{ (r.content.choices[0].message.content | from_json) }}"
+# -----------------------------------------------------------------------------
+# rest_command:
+#   chefiq_ai_setup:
+#     url: https://api.mistral.ai/v1/chat/completions
+#     method: POST
+#     timeout: 30
+#     headers:
+#       authorization: !secret chefiq_mistral_bearer
+#       content-type: application/json
+#     payload: >-
+#       {% set sys = 'You are an expert chef and food-safety specialist. Read the cook description and return ONLY a JSON object with EXACTLY these keys: probe_mode, meat_type, target_temp_c, carryover_offset_c, pre_alert_lead_c, rest_minutes, proof_target_hours, preset, summary. (Same rules as the AI Task instructions above.)' %}
+#       {
+#         "model": "mistral-medium-latest",
+#         "temperature": 0.2,
+#         "max_tokens": 400,
+#         "response_format": {"type": "json_object"},
+#         "messages": [
+#           {"role": "system", "content": {{ sys | to_json }} },
+#           {"role": "user", "content": {{ states('input_text.chef_iq_cook_request') | to_json }} }
+#         ]
+#       }
+# =============================================================================
