@@ -287,3 +287,66 @@ template:
           {% elif active and core < 54.4 %}Coming up to temp
           {% elif core < 5 %}❄️ Cold / chilled
           {% else %}Idle{% endif %}
+
+      # =====================================================================
+      # COLD-CHAIN / FRIDGE MODE — the probe is also a wireless fridge monitor
+      # ---------------------------------------------------------------------
+      # The same probe placed in your fridge/freezer becomes a bacterial-growth
+      # monitor. Growth rate uses the Ratkowsky/Belehrádek SQUARE-ROOT model
+      # (the food-microbiology standard for chilled storage):
+      #     √(growth rate) ∝ (T − Tmin),  Tmin ≈ −7.5 °C for psychrotrophic
+      #     spoilage organisms. Referenced to an ideal 3 °C fridge.
+      # FSIS: keep the fridge ≤ 4.4 °C (40 °F); danger zone is 4.4–60 °C, where
+      # bacteria can double in as little as 20 min; perishables unsafe after
+      # ~2 h warm. Set input_select.chef_iq_probe_mode = Fridge when used here.
+      # =====================================================================
+
+      # ---- Fridge status (FSIS thresholds) --------------------------------
+      - name: Chef iQ Fridge Status
+        state: >
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if t is none %}Unknown
+          {% elif t < -1 %}Freezing ({{ t|round(1) }}°C)
+          {% elif t <= 4 %}Ideal ({{ t|round(1) }}°C)
+          {% elif t <= 5 %}OK ({{ t|round(1) }}°C)
+          {% elif t <= 8 %}Too warm ({{ t|round(1) }}°C)
+          {% else %}DANGER ZONE ({{ t|round(1) }}°C){% endif %}
+
+      # ---- Bacteria growth factor vs an ideal 3 °C fridge -----------------
+      - name: Chef iQ Bacteria Growth Factor
+        unit_of_measurement: "x"
+        state_class: measurement
+        state: >
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if t is none %}unknown{% elif t <= -7.5 %}0
+          {% else %}{{ (((t+7.5)/10.5)**2)|round(2) }}{% endif %}
+
+      # ---- Shelf-life multiplier (inverse of growth) ----------------------
+      - name: Chef iQ Shelf Life Factor
+        unit_of_measurement: "x"
+        state_class: measurement
+        state: >
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if t is none %}unknown{% elif t <= -7.5 %}99
+          {% else %}{% set r = ((t+7.5)/10.5)**2 %}{{ (1/r)|round(2) if r>0 else 99 }}{% endif %}
+
+      # ---- Continuous warm duration (door-open / power-outage detector) ----
+      # Requires a threshold binary_sensor 'Chef iQ Fridge Warm' = core above 5 °C.
+      - name: Chef iQ Fridge Warm Duration
+        unit_of_measurement: min
+        state_class: measurement
+        state: >
+          {% set b = states('binary_sensor.chef_iq_fridge_warm') %}
+          {% if b != 'on' %}0
+          {% else %}{{ ((now() - states.binary_sensor.chef_iq_fridge_warm.last_changed).total_seconds()/60)|int }}{% endif %}
+
+      # ---- Cold-chain verdict (FSIS 2-hour rule) --------------------------
+      - name: Chef iQ Cold Chain
+        state: >
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% set warm = states('sensor.chefiq_fridge_warm_duration')|float(0) %}
+          {% if t is none %}No probe
+          {% elif t > 5 and warm >= 120 %}⚠️ Breach - {{ (warm/60)|round(1) }}h warm, check food
+          {% elif t > 5 %}⚠️ Warming - {{ warm|int }} min above 5°C
+          {% elif t <= 4 %}✅ Cold chain intact
+          {% else %}✅ OK ({{ t|round(1) }}°C){% endif %}
