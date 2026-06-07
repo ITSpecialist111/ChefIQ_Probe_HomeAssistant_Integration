@@ -350,3 +350,77 @@ template:
           {% elif t > 5 %}⚠️ Warming - {{ warm|int }} min above 5°C
           {% elif t <= 4 %}✅ Cold chain intact
           {% else %}✅ OK ({{ t|round(1) }}°C){% endif %}
+
+      # =====================================================================
+      # FERMENTING / PROOFING — culture-temperature coaching (session use)
+      # ---------------------------------------------------------------------
+      # Each culture has an optimal temperature band; outside it ferments too
+      # slowly, or hot enough to kill the culture. Fermentation rate roughly
+      # follows the Q10 rule (≈ doubles per 10 °C). Pick the culture with
+      # input_select.chef_iq_ferment_type (Yogurt / Bread dough / Sourdough
+      # starter / Beer (ale) / Tempeh / Natto). Bands are [min, ideal, max] °C.
+      # =====================================================================
+
+      - name: Chef iQ Ferment Status
+        state: >
+          {% set bands = {'Yogurt':[42,44,46],'Bread dough':[24,26,28],'Sourdough starter':[24,25,28],'Beer (ale)':[18,20,22],'Tempeh':[29,30,31],'Natto':[40,42,43]} %}
+          {% set b = bands.get(states('input_select.chef_iq_ferment_type'), [24,26,28]) %}
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if t is none %}Unknown
+          {% elif t < b[0]-3 %}Too cold ({{ t|round(1) }}°C) - won't ferment
+          {% elif t < b[0] %}Cool ({{ t|round(1) }}°C) - slow
+          {% elif t <= b[2] %}Ideal ({{ t|round(1) }}°C)
+          {% elif t <= b[2]+4 %}Warm ({{ t|round(1) }}°C) - fast
+          {% else %}Too hot ({{ t|round(1) }}°C) - may kill culture{% endif %}
+
+      - name: Chef iQ Ferment Target
+        state: >
+          {% set bands = {'Yogurt':[42,44,46],'Bread dough':[24,26,28],'Sourdough starter':[24,25,28],'Beer (ale)':[18,20,22],'Tempeh':[29,30,31],'Natto':[40,42,43]} %}
+          {% set b = bands.get(states('input_select.chef_iq_ferment_type'), [24,26,28]) %}
+          {{ b[0] }}-{{ b[2] }}°C (ideal {{ b[1] }})
+
+      # Relative fermentation speed vs the ideal temp (Q10 = 2)
+      - name: Chef iQ Ferment Speed
+        unit_of_measurement: "x"
+        state_class: measurement
+        state: >
+          {% set bands = {'Yogurt':[42,44,46],'Bread dough':[24,26,28],'Sourdough starter':[24,25,28],'Beer (ale)':[18,20,22],'Tempeh':[29,30,31],'Natto':[40,42,43]} %}
+          {% set b = bands.get(states('input_select.chef_iq_ferment_type'), [24,26,28]) %}
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if t is none %}unknown{% else %}{{ (2 ** ((t - b[1])/10))|round(2) }}{% endif %}
+
+      # =====================================================================
+      # CHOCOLATE TEMPERING — guided melt → seed → working-temp coach
+      # ---------------------------------------------------------------------
+      # Tempering grows stable cocoa-butter (Form V) crystals for snap & shine.
+      # Curve per chocolate type (input_select.chef_iq_chocolate_type), as
+      # [MELT, SEED, WORK_LOW, WORK_HIGH, MAX] °C:
+      #   Dark  [48,28,31,32,33]   Milk [43,27,29,30,31]   White [41,26,28,29,30]
+      # Melt fully, cool to seed, then gently warm into the working band.
+      # =====================================================================
+
+      - name: Chef iQ Temper Stage
+        state: >
+          {% set tbl = {'Dark':[48,28,31,32,33],'Milk':[43,27,29,30,31],'White':[41,26,28,29,30]} %}
+          {% set b = tbl.get(states('input_select.chef_iq_chocolate_type'), [48,28,31,32,33]) %}
+          {% set MELT=b[0] %}{% set SEED=b[1] %}{% set WL=b[2] %}{% set MAX=b[4] %}
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if t is none %}Unknown
+          {% elif t >= MELT-3 %}🔥 Melting ({{ t|round(1) }}°C) - fully melt, then cool to {{ SEED }}°C
+          {% elif t > MAX %}⬇️ Cooling - {{ (t-SEED)|round(1) }}°C above seed ({{ SEED }}°C)
+          {% elif t >= WL %}✅ In temper - working temp, use now ({{ t|round(1) }}°C)
+          {% elif t >= SEED %}🌱 Seeded - warm gently to {{ b[2] }}-{{ b[3] }}°C
+          {% else %}❄️ Too cool ({{ t|round(1) }}°C) - reheat gently to {{ WL }}°C{% endif %}
+
+      - name: Chef iQ Temper Target
+        state: >
+          {% set tbl = {'Dark':[48,28,31,32,33],'Milk':[43,27,29,30,31],'White':[41,26,28,29,30]} %}
+          {% set b = tbl.get(states('input_select.chef_iq_chocolate_type'), [48,28,31,32,33]) %}
+          Melt {{ b[0] }} · seed {{ b[1] }} · work {{ b[2] }}-{{ b[3] }}°C
+
+      - name: Chef iQ In Temper
+        state: >
+          {% set tbl = {'Dark':[48,28,31,32,33],'Milk':[43,27,29,30,31],'White':[41,26,28,29,30]} %}
+          {% set b = tbl.get(states('input_select.chef_iq_chocolate_type'), [48,28,31,32,33]) %}
+          {% set t = states('sensor.chef_iq_cq60_tip')|float(none) %}
+          {% if t is none %}Unknown{% elif t >= b[2] and t <= b[4] %}Yes{% else %}No{% endif %}
