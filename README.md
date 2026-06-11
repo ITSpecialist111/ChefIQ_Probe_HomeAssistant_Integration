@@ -17,8 +17,8 @@ A native Home Assistant integration for the **Chef iQ CQ60 Smart Wireless Meat T
 * 📊 **Four‑probe dashboard:** [`examples/dashboard_multi_probe.yaml`](examples/dashboard_multi_probe.yaml)
 * 🛠️ **Install:** [HACS — recommended](#install-hacs--recommended) · [Manual](#install-manual)
 * 🍗 **Multi‑probe setup guide:** [Multiple probes](#multiple-probes)
-* �️ **Where it's heading:** [`ROADMAP.md`](ROADMAP.md)
-* �🐛 **Issues / feature requests:** [GitHub issues](https://github.com/ITSpecialist111/ChefIQ_Probe_HomeAssistant_Integration/issues)
+* 🗺️ **Where it's heading:** [`ROADMAP.md`](ROADMAP.md)
+* 🐛 **Issues / feature requests:** [GitHub issues](https://github.com/ITSpecialist111/ChefIQ_Probe_HomeAssistant_Integration/issues)
 
 ## Sensors per probe
 
