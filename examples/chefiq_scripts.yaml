@@ -1,0 +1,122 @@
+script:
+  chefiq_start_cook:
+    alias: ChefIQ Start Cook
+    icon: mdi:thermometer-probe
+    mode: single
+    sequence:
+    - action: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.chefiq_cook_start
+      data:
+        datetime: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}'
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chefiq_cook_active
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.chefiq_alert_sent
+  chefiq_kitchen_announce:
+    alias: Chef iQ · Kitchen Announce
+    fields:
+      boost:
+        description: Points ABOVE the current music level to speak (unset = use the Announce Boost slider)
+        selector:
+          number:
+            max: 50
+            min: 0
+            step: 1
+      cap:
+        default: 80
+        description: Maximum announce level 0-100
+        selector:
+          number:
+            max: 100
+            min: 10
+            step: 1
+      message:
+        description: Text to speak
+        example: Your meat is ready
+        selector:
+          text: {}
+      volume:
+        default: 0
+        description: Minimum announce level 0-100 (0 = fully relative to music). Acts as a floor for urgent
+          alerts.
+        selector:
+          number:
+            max: 100
+            min: 0
+            step: 1
+    icon: mdi:bullhorn
+    max: 5
+    mode: queued
+    sequence:
+    - variables:
+        boost: '{{ (boost if boost is defined else states(''input_number.chef_iq_announce_boost'')) |
+          float(8) }}'
+        cap: '{{ cap | default(80) | float }}'
+        cur_vol: '{{ state_attr(''media_player.sonos'',''volume_level'') | float(0.3) }}'
+        min_level: '{{ volume | default(0) | float }}'
+        speak_secs: '{{ [3 + (((message | default('''')) | string).split() | length) / 2.0, 30] | min
+          }}'
+        spk: media_player.sonos
+        was_playing: '{{ is_state(''media_player.sonos'',''playing'') }}'
+    - if:
+      - condition: state
+        entity_id: input_boolean.chef_iq_announcing
+        state: 'off'
+      then:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.chef_iq_announcing
+      - action: input_number.set_value
+        data:
+          value: '{{ cur_vol }}'
+        target:
+          entity_id: input_number.chef_iq_sonos_prev_volume
+      - action: sonos.snapshot
+        continue_on_error: true
+        data:
+          entity_id: media_player.sonos
+          with_group: true
+    - variables:
+        base100: '{{ states(''input_number.chef_iq_sonos_prev_volume'') | float(0.3) * 100 }}'
+    - variables:
+        target_vol: '{{ ([[ base100 + boost, min_level, 15 ] | max, cap] | min) / 100 }}'
+    - action: media_player.volume_set
+      data:
+        volume_level: '{{ target_vol }}'
+      target:
+        entity_id: media_player.sonos
+    - action: tts.speak
+      data:
+        cache: true
+        media_player_entity_id: media_player.sonos
+        message: '{{ message }}'
+      target:
+        entity_id: tts.openai_tts_nova
+    - continue_on_timeout: true
+      timeout:
+        seconds: 4
+      wait_template: '{{ is_state(''media_player.sonos'',''playing'') }}'
+    - delay:
+        seconds: '{{ speak_secs | int }}'
+    - if:
+      - condition: template
+        value_template: '{{ was_playing }}'
+      then:
+      - action: sonos.restore
+        continue_on_error: true
+        data:
+          entity_id: media_player.sonos
+          with_group: true
+      - delay:
+          seconds: 1
+    - action: media_player.volume_set
+      data:
+        volume_level: '{{ states(''input_number.chef_iq_sonos_prev_volume'') | float(0.3) }}'
+      target:
+        entity_id: media_player.sonos
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.chef_iq_announcing

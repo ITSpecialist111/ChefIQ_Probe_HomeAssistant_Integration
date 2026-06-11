@@ -1,0 +1,1106 @@
+automation:
+- id: chefiq_ai_coach_poll
+  alias: ChefIQ · AI Coach (5 min)
+  description: Poll the HA AI Task every 5 min ONLY while actively cooking, for an expert insight. Skips
+    rest/idle to save tokens. No config paste needed.
+  triggers:
+  - minutes: /5
+    trigger: time_pattern
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.chef_iq_resting
+    state: 'off'
+  - condition: state
+    entity_id: input_boolean.chef_iq_cooling
+    state: 'off'
+  - condition: template
+    value_template: '{% set core = states(''sensor.chefiq_meat_temperature'')|float(-999) %}{% set amb
+      = states(''sensor.chefiq_ambient_temperature'')|float(-999) %}{% set rate = states(''sensor.chefiq_meat_rate'')|float(0)
+      %}{{ core > -50 and (rate >= 0.1 or (amb - core) >= 5) }}'
+  actions:
+  - action: ai_task.generate_data
+    continue_on_error: true
+    data:
+      entity_id: ai_task.openai_ai_task_3
+      instructions: 'You are a concise expert cooking assistant monitoring a smart meat probe. Give ONE
+        short, friendly, actionable insight (max 2 sentences). Be specific about food safety and doneness,
+        use the data, never invent numbers. If the food is done and safe, say so and advise the next step
+        (rest or pull). Add judgement; do not just repeat numbers the user can already see.
+
+
+        Live cook data (Celsius). Mode: {{ states(''input_select.chef_iq_probe_mode'') }}, Meat type:
+        {{ states(''input_select.chef_iq_meat_type'') }}, Core: {{ states(''sensor.chefiq_meat_temperature'')
+        }}, Oven/ambient: {{ states(''sensor.chefiq_ambient_temperature'') }}, Rate C/min: {{ states(''sensor.chefiq_meat_rate'')
+        }}, Target: {{ states(''input_number.chefiq_target_temperature'') }}, Pasteurization %: {{ states(''sensor.chef_iq_pasteurization'')
+        }}, Food safety: {{ states(''sensor.chef_iq_food_safety'') }}, Phase: {{ states(''sensor.chef_iq_cook_phase'')
+        }}, Juiciness %: {{ states(''sensor.chef_iq_juiciness'') }}, Predicted final: {{ states(''sensor.chef_iq_predicted_final_temp'')
+        }}'
+      structure:
+        insight:
+          description: One short expert insight, max 2 sentences
+          selector:
+            text: {}
+      task_name: ChefIQ Cook Coach
+    response_variable: out
+  - variables:
+      insight: '{{ out.data.insight | default('''') if (out is defined and out.data is defined and out.data
+        is mapping) else '''' }}'
+  - condition: template
+    value_template: '{{ insight | length > 3 }}'
+  - action: input_text.set_value
+    data:
+      value: '{{ insight[:255] }}'
+    target:
+      entity_id: input_text.chef_iq_ai_coach
+  - action: input_datetime.set_datetime
+    data:
+      datetime: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}'
+    target:
+      entity_id: input_datetime.chef_iq_ai_coach_updated
+  - if:
+    - condition: state
+      entity_id: input_boolean.chef_iq_ai_announce
+      state: 'on'
+    then:
+    - action: script.chefiq_kitchen_announce
+      data:
+        message: '{{ insight }}'
+  mode: single
+- id: chefiq_ai_cook_setup
+  alias: ChefIQ · AI Cook Setup
+  description: Describe your cook in plain English; AI (HA AI Task) sets the probe mode, meat-safety type,
+    target temp, carryover, pre-alert, rest and proof presets, then starts the session. No config paste
+    needed.
+  triggers:
+  - entity_id: input_button.chef_iq_cook_setup
+    trigger: state
+  conditions: []
+  actions:
+  - condition: template
+    value_template: '{{ states(''input_text.chef_iq_cook_request'') | trim | length > 2 }}'
+  - action: input_text.set_value
+    data:
+      value: 🤔 Asking the AI to plan your cook…
+    target:
+      entity_id: input_text.chef_iq_cook_plan
+  - action: ai_task.generate_data
+    continue_on_error: true
+    data:
+      entity_id: ai_task.openai_ai_task_3
+      instructions: 'You are an expert chef and food-safety specialist configuring a Bluetooth meat-probe
+        monitor from a free-text description. Food-safety rules: Poultry pull 74C; Ground or tenderized
+        (mince, burgers, sausages) 71C; Intact whole-muscle cuts by doneness; Fish 52-63C; if unsure for
+        poultry/pork choose the SAFER higher category; meat_type = N/A if not a meat cook. target_temp_c
+        = CORE pull temperature in C. Doneness: beef rare 52, medium-rare 57, medium 63, medium-well 68,
+        well 74; poultry breast 74, thigh 79; pork medium 63, well 71; tough collagen cuts cooked for
+        tenderness (brisket, chuck, pork shoulder, short ribs, lamb shank) 90-96C to render collagen;
+        fish 52-63. Honor any explicit temperature the user gives. Clamp 0-110. carryover_offset_c: thin/small
+        1-2, medium roasts 3-5, large/thick 5-8, collagen cuts ~2. pre_alert_lead_c: small/fast 3, large
+        roasts 5-8. rest_minutes: steaks 5-10, chicken pieces 5-10, whole roast or bird 15-30, brisket
+        or pork shoulder 30-60 (clamp 0-60). proof_target_hours: only when probe_mode is Fermenting, the
+        target proof/ferment time in hours implied by the description, else 0. preset: choose the closest
+        EXACT preset string whose meat name matches, otherwise Custom. summary: ONE short friendly sentence
+        giving the plan and the key reason (safety or texture). Be decisive and safe.
+
+
+        User request: {{ states(''input_text.chef_iq_cook_request'') }}'
+      structure:
+        carryover_offset_c:
+          description: Expected carryover rise C
+          selector:
+            number:
+              max: 10
+              min: 0
+        meat_type:
+          description: Food-safety category or N/A
+          selector:
+            select:
+              options:
+              - Intact cut (steak/roast)
+              - Ground / tenderized
+              - Poultry
+              - Fish
+              - N/A
+        pre_alert_lead_c:
+          description: Degrees before target to pre-alert
+          selector:
+            number:
+              max: 15
+              min: 1
+        preset:
+          description: Closest exact preset or Custom
+          selector:
+            select:
+              options:
+              - Custom
+              - Beef · Rare (52°C)
+              - Beef · Medium Rare (57°C)
+              - Beef · Medium (63°C)
+              - Beef · Medium Well (68°C)
+              - Beef · Well Done (74°C)
+              - Chicken · Breast (74°C)
+              - Chicken · Thigh (79°C)
+              - Turkey (74°C)
+              - Pork · Medium (63°C)
+              - Pork · Well (71°C)
+              - Lamb · Medium Rare (57°C)
+              - Lamb · Medium (63°C)
+              - Fish (52°C)
+              - Burger · Medium (71°C)
+              - Sous Vide · Steak (55°C)
+        probe_mode:
+          description: Best-fit probe mode
+          selector:
+            select:
+              options:
+              - Cooking
+              - Fridge
+              - Freezer
+              - Fermenting
+              - Tempering chocolate
+              - Other
+        proof_target_hours:
+          description: Proof/ferment target hours, else 0
+          selector:
+            number:
+              max: 72
+              min: 0
+        rest_minutes:
+          description: Rest time minutes
+          selector:
+            number:
+              max: 60
+              min: 0
+        summary:
+          description: One short friendly sentence
+          selector:
+            text: {}
+        target_temp_c:
+          description: Core pull temp C, 0 if not a temperature cook
+          selector:
+            number:
+              max: 110
+              min: 0
+      task_name: ChefIQ Cook Setup
+    response_variable: out
+  - variables:
+      data: '{{ out.data if (out is defined and out.data is defined and out.data is mapping) else {} }}'
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ data.probe_mode is defined }}'
+      sequence:
+      - variables:
+          carry: '{{ data.carryover_offset_c | float(0) }}'
+          lead: '{{ data.pre_alert_lead_c | float(3) }}'
+          meat_v: '{{ data.meat_type if data.meat_type in [''Intact cut (steak/roast)'',''Ground / tenderized'',''Poultry'',''Fish'']
+            else '''' }}'
+          mode_v: '{{ data.probe_mode if data.probe_mode in [''Cooking'',''Fridge'',''Freezer'',''Fermenting'',''Tempering
+            chocolate'',''Other''] else ''Other'' }}'
+          plan_txt: '{{ (data.summary | default(''Cook configured.''))[:255] }}'
+          proofh: '{{ data.proof_target_hours | float(0) }}'
+          restm: '{{ data.rest_minutes | float(0) }}'
+          tgt: '{{ data.target_temp_c | float(0) }}'
+      - action: input_select.select_option
+        data:
+          option: '{{ mode_v }}'
+        target:
+          entity_id: input_select.chef_iq_probe_mode
+      - action: input_select.select_option
+        data:
+          option: Custom
+        target:
+          entity_id: input_select.chefiq_preset
+      - action: input_number.set_value
+        data:
+          value: '{{ [[carry,10]|min,0]|max }}'
+        target:
+          entity_id: input_number.chef_iq_carryover_offset
+      - action: input_number.set_value
+        data:
+          value: '{{ [[lead,15]|min,1]|max }}'
+        target:
+          entity_id: input_number.chef_iq_pre_alert_lead
+      - action: input_number.set_value
+        data:
+          value: '{{ [[restm,60]|min,0]|max }}'
+        target:
+          entity_id: input_number.chef_iq_rest_minutes
+      - if:
+        - condition: template
+          value_template: '{{ mode_v == ''Cooking'' and meat_v != '''' }}'
+        then:
+        - action: input_select.select_option
+          data:
+            option: '{{ meat_v }}'
+          target:
+            entity_id: input_select.chef_iq_meat_type
+      - if:
+        - condition: template
+          value_template: '{{ mode_v == ''Cooking'' and tgt >= 20 }}'
+        then:
+        - action: input_number.set_value
+          data:
+            value: '{{ [[tgt,110]|min,20]|max }}'
+          target:
+            entity_id: input_number.chefiq_target_temperature
+      - if:
+        - condition: template
+          value_template: '{{ mode_v == ''Fermenting'' and proofh > 0 }}'
+        then:
+        - action: input_number.set_value
+          data:
+            value: '{{ [[proofh,72]|min,1]|max }}'
+          target:
+            entity_id: input_number.chef_iq_proof_target_hours
+      - action: input_text.set_value
+        data:
+          value: '{{ plan_txt }}'
+        target:
+          entity_id: input_text.chef_iq_cook_plan
+      - if:
+        - condition: template
+          value_template: '{{ mode_v == ''Cooking'' }}'
+        then:
+        - action: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.chefiq_cook_active
+        - action: input_datetime.set_datetime
+          data:
+            datetime: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}'
+          target:
+            entity_id: input_datetime.chefiq_cook_start
+        - action: input_boolean.turn_off
+          target:
+            entity_id:
+            - input_boolean.chefiq_alert_sent
+            - input_boolean.chef_iq_pre_alert_sent
+            - input_boolean.chef_iq_resting
+            - input_boolean.chef_iq_cooling
+            - input_boolean.chef_iq_stall_notified
+      - if:
+        - condition: state
+          entity_id: input_boolean.chef_iq_ai_announce
+          state: 'on'
+        then:
+        - action: script.chefiq_kitchen_announce
+          data:
+            message: '{{ plan_txt }}'
+    default:
+    - action: input_text.set_value
+      data:
+        value: ⚠️ Could not configure - the AI did not respond. Try rephrasing, or check the OpenAI/AI
+          Task integration.
+      target:
+        entity_id: input_text.chef_iq_cook_plan
+  mode: single
+- id: chefiq_auto_start
+  alias: ChefIQ · Auto-start Cook
+  description: Start cook timer when the probe heats up
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_rate
+    above: 0.5
+    for:
+      minutes: 2
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'off'
+  - condition: template
+    value_template: '{{ states(''sensor.chefiq_meat_temperature'') | float(-999) > -100 }}'
+  actions:
+  - action: input_datetime.set_datetime
+    target:
+      entity_id: input_datetime.chefiq_cook_start
+    data:
+      datetime: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}'
+  - action: input_boolean.turn_off
+    target:
+      entity_id: input_boolean.chefiq_alert_sent
+  - action: input_boolean.turn_on
+    target:
+      entity_id: input_boolean.chefiq_cook_active
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🔥 Chef iQ — Cook started
+      message: Detected the probe heating up — cook timer started automatically.
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  mode: single
+- id: chefiq_auto_stop
+  alias: ChefIQ · Auto-stop Cook
+  description: Stop cook when probe is pulled/cools rapidly, settles at room temp (idle), or goes offline.
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_rate
+    below: -2
+    for:
+      minutes: 2
+    id: cooling
+  - trigger: state
+    entity_id: sensor.chefiq_meat_temperature
+    to:
+    - unavailable
+    - unknown
+    for:
+      minutes: 15
+    id: offline
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_temperature
+    below: 30
+    for:
+      minutes: 30
+    id: idle
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'on'
+  actions:
+  - action: input_boolean.turn_off
+    target:
+      entity_id:
+      - input_boolean.chefiq_cook_active
+      - input_boolean.chefiq_alert_sent
+      - input_boolean.chef_iq_pre_alert_sent
+      - input_boolean.chef_iq_stall_notified
+  - variables:
+      reason: '{{ {''cooling'':''probe pulled / cooling fast'',''offline'':''probe went offline'',''idle'':''probe
+        sat at room temp for 30 min''}.get(trigger.id, ''cook finished'') }}'
+  - action: notify.mobile_app_your_phone
+    data:
+      data:
+        group: chefiq
+        tag: chefiq_cook
+      message: Cook timer stopped automatically ({{ reason }}). The AI coach has stopped.
+      title: ✅ Chef iQ — Cook ended
+  mode: single
+- id: chefiq_choc_temper
+  alias: ChefIQ · Chocolate In Temper
+  triggers:
+  - trigger: state
+    entity_id: sensor.chef_iq_in_temper
+    to: 'Yes'
+    for:
+      seconds: 10
+  conditions:
+  - condition: state
+    entity_id: input_select.chef_iq_probe_mode
+    state: Tempering chocolate
+  actions:
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: The {{ states("input_select.chef_iq_chocolate_type")|lower }} chocolate is in temper at
+        {{ states("sensor.chefiq_meat_temperature") }} degrees. Use it now.
+      volume: 42
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🍫 Chef iQ — In temper
+      message: '{{ states("input_select.chef_iq_chocolate_type") }} chocolate at working temp ({{ states("sensor.chefiq_meat_temperature")
+        }}°C) — use now.'
+      data:
+        tag: chefiq_choc
+        group: chefiq
+  mode: single
+- id: chefiq_cook_briefing
+  alias: ChefIQ · Cook-start Safety Briefing
+  triggers:
+  - trigger: state
+    entity_id: input_boolean.chefiq_cook_active
+    from: 'off'
+    to: 'on'
+  actions:
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: '{% set mt = states(''input_select.chef_iq_meat_type'') %}{% set preset = states(''input_select.chefiq_preset'')
+        %}{% set tgt = states(''input_number.chefiq_target_temperature'') %}Cook started for {{ preset
+        }}. {% if mt == ''Poultry'' %}Poultry: keep the probe in the thickest part. I will confirm when
+        it is pasteurized by time and temperature, not just a number.{% elif mt == ''Ground / tenderized''
+        %}Ground or tenderized meat: pathogens are throughout, so the core must reach a safe lethality.
+        I am tracking it.{% elif mt == ''Fish'' %}Fish: cooking to your chosen doneness. I will track
+        pasteurization if you are holding it.{% else %}Intact cut: the surface is the part to worry about
+        and it cooks hottest, so your core reading is conservative. I will track doneness and carryover.{%
+        endif %}'
+      volume: 40
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🍳 Chef iQ — Cook started
+      message: '{% set mt = states(''input_select.chef_iq_meat_type'') %}{% set preset = states(''input_select.chefiq_preset'')
+        %}{% set tgt = states(''input_number.chefiq_target_temperature'') %}{{ mt }} · {{ preset }}. Tracking
+        safety + doneness. Keep the probe in the thickest part.'
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  mode: single
+- id: chefiq_cook_end
+  alias: ChefIQ · End Cook Session
+  description: 'Manually end the cook session: stops the timer, clears flags, stops the AI coach polling.'
+  triggers:
+  - trigger: state
+    entity_id: input_button.chef_iq_cook_end
+  conditions: []
+  actions:
+  - action: input_boolean.turn_off
+    target:
+      entity_id:
+      - input_boolean.chefiq_cook_active
+      - input_boolean.chefiq_alert_sent
+      - input_boolean.chef_iq_pre_alert_sent
+      - input_boolean.chef_iq_resting
+      - input_boolean.chef_iq_cooling
+      - input_boolean.chef_iq_stall_notified
+  - action: input_text.set_value
+    target:
+      entity_id: input_text.chef_iq_cook_plan
+    data:
+      value: ✅ Cook session ended. Describe your next cook above to start again.
+  - action: notify.mobile_app_your_phone
+    data:
+      title: ✅ Chef iQ — Session ended
+      message: Cook session ended manually. The AI coach has stopped.
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  - if:
+    - condition: state
+      entity_id: input_boolean.chef_iq_ai_announce
+      state: 'on'
+    then:
+    - action: script.chefiq_kitchen_announce
+      data:
+        message: Cook session ended.
+  mode: single
+- id: chefiq_cool_reset
+  alias: ChefIQ · Cooling Reset
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_temperature
+    below: 5
+    id: chilled
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_temperature
+    above: 57
+    id: reheat
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chef_iq_cooling
+    state: 'on'
+  actions:
+  - action: input_boolean.turn_off
+    target:
+      entity_id: input_boolean.chef_iq_cooling
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: chilled
+      sequence:
+      - action: notify.mobile_app_your_phone
+        data:
+          title: ✅ Chef iQ — Safely chilled
+          message: Core below 5°C — safe to refrigerate/store.
+          data:
+            tag: chefiq_cool
+            group: chefiq
+  mode: single
+- id: chefiq_cool_start
+  alias: ChefIQ · Cooling Started
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_temperature
+    below: 55
+    for:
+      minutes: 1
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'off'
+  - condition: state
+    entity_id: input_boolean.chef_iq_cooling
+    state: 'off'
+  - condition: numeric_state
+    entity_id: sensor.chefiq_meat_rate
+    below: -0.1
+  actions:
+  - action: input_datetime.set_datetime
+    target:
+      entity_id: input_datetime.chef_iq_cool_start
+    data:
+      datetime: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}'
+  - action: input_boolean.turn_on
+    target:
+      entity_id: input_boolean.chef_iq_cooling
+  - action: notify.mobile_app_your_phone
+    data:
+      title: ❄️ Chef iQ — Cooling started
+      message: Chill below 5°C within 6 hours (and past 21°C within 2h) to stay safe.
+      data:
+        tag: chefiq_cool
+        group: chefiq
+  mode: single
+- id: chefiq_danger_zone
+  alias: ChefIQ · Danger Zone Warning
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chef_iq_danger_zone_time
+    above: 240
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'on'
+  actions:
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Food safety warning. The food has been in the danger zone for over four hours without reaching
+        a safe temperature. Cook it through now or discard it.
+      volume: 50
+  - action: notify.mobile_app_your_phone
+    data:
+      title: ⚠️ Chef iQ — Danger zone 4h+
+      message: Food held 5-54C over 4h without pasteurizing (FDA limit). Cook through now or discard.
+      data:
+        tag: chefiq_safety
+        group: chefiq
+        color: red
+  mode: single
+- id: chefiq_ferment_hot
+  alias: ChefIQ · Ferment Too Hot
+  triggers:
+  - trigger: template
+    value_template: '{{ ''Too hot'' in states(''sensor.chef_iq_ferment_status'') }}'
+  conditions:
+  - condition: state
+    entity_id: input_select.chef_iq_probe_mode
+    state: Fermenting
+  actions:
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Warning. Your {{ states("input_select.chef_iq_ferment_type") }} is too hot and the culture
+        may be damaged. Cool it down.
+      volume: 45
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🔥 Chef iQ — Ferment too hot
+      message: '{{ states("sensor.chefiq_meat_temperature") }}°C may kill the culture. Cool down.'
+      data:
+        tag: chefiq_ferment
+        group: chefiq
+        color: red
+  mode: single
+- id: chefiq_ferment_ready
+  alias: ChefIQ · Ferment At Temp
+  triggers:
+  - trigger: template
+    value_template: '{{ ''Ideal'' in states(''sensor.chef_iq_ferment_status'') }}'
+    for:
+      minutes: 2
+  conditions:
+  - condition: state
+    entity_id: input_select.chef_iq_probe_mode
+    state: Fermenting
+  actions:
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Your {{ states("input_select.chef_iq_ferment_type") }} is at the ideal temperature and
+        fermenting nicely.
+      volume: 38
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🧫 Chef iQ — At fermenting temp
+      message: '{{ states("input_select.chef_iq_ferment_type") }} in the ideal band ({{ states("sensor.chefiq_meat_temperature")
+        }}°C).'
+      data:
+        tag: chefiq_ferment
+        group: chefiq
+  mode: single
+- id: chefiq_fridge_breach
+  alias: ChefIQ · Cold-chain Breach
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chef_iq_fridge_warm_duration
+    above: 120
+  conditions:
+  - condition: state
+    entity_id: input_select.chef_iq_probe_mode
+    state: Fridge
+  actions:
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Cold chain warning. The fridge has been above 5 degrees for over two hours. Check whether
+        the food is still safe.
+      volume: 45
+  - action: notify.mobile_app_your_phone
+    data:
+      title: ⚠️ Chef iQ — Cold-chain breach
+      message: Fridge >5°C for 2h+. Perishables may be unsafe (FSIS 2-hour rule).
+      data:
+        tag: chefiq_fridge
+        group: chefiq
+        color: red
+  mode: single
+- id: chefiq_fridge_door
+  alias: ChefIQ · Fridge Rapid Warming
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_rate
+    above: 0.3
+    for:
+      minutes: 3
+  conditions:
+  - condition: state
+    entity_id: input_select.chef_iq_probe_mode
+    state: Fridge
+  actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🚪 Chef iQ — Fridge warming fast
+      message: Temperature rising quickly ({{ states("sensor.chefiq_meat_rate") }}°/min). Door left open?
+      data:
+        tag: chefiq_fridge
+        group: chefiq
+  mode: single
+- id: chefiq_fridge_warm
+  alias: ChefIQ · Fridge Warm
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_temperature
+    above: 5
+    for:
+      minutes: 30
+  conditions:
+  - condition: state
+    entity_id: input_select.chef_iq_probe_mode
+    state: Fridge
+  actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      title: ❄️ Chef iQ — Fridge warm
+      message: Fridge above 5°C for 30 min ({{ states("sensor.chefiq_meat_temperature") }}°C). Door ajar
+        or failing? Bacteria now grow {{ states("sensor.chef_iq_bacteria_growth_factor") }}x faster.
+      data:
+        tag: chefiq_fridge
+        group: chefiq
+  mode: single
+- id: chefiq_hold_dropped
+  alias: ChefIQ · Hot-hold Dropped
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_temperature
+    below: 54
+    for:
+      minutes: 2
+  conditions:
+  - condition: state
+    entity_id: sensor.chef_iq_safe_to_eat
+    state: Pasteurized
+  - condition: state
+    entity_id: input_boolean.chef_iq_cooling
+    state: 'off'
+  - condition: numeric_state
+    entity_id: sensor.chefiq_meat_temperature
+    above: 40
+  actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🌡️ Chef iQ — Hot-hold dropping
+      message: Cooked food fell below 54C. Eat soon, chill it, or keep it hot.
+      data:
+        tag: chefiq_safety
+        group: chefiq
+  mode: single
+- id: chefiq_low_battery
+  alias: ChefIQ · Low Battery
+  description: Warn before the probe dies mid-session (it is battery powered).
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_battery
+    below: 20
+    id: low
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_battery
+    below: 8
+    id: critical
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: critical
+      sequence:
+      - if:
+        - condition: template
+          value_template: '{{ cooking }}'
+        then:
+        - action: script.chefiq_kitchen_announce
+          data:
+            message: Probe battery critical at {{ batt }} percent during a cook. Put it on the charger
+              soon or the reading will drop out.
+            volume: 50
+      - action: notify.mobile_app_your_phone
+        data:
+          title: 🪫 Chef iQ — Battery critical ({{ batt }}%)
+          message: '{% if cooking %}Cooking in progress — charge soon or you will lose the reading.{%
+            else %}Charge the probe before your next session.{% endif %}'
+          data:
+            tag: chefiq_battery
+            group: chefiq
+            color: red
+    - conditions:
+      - condition: trigger
+        id: low
+      sequence:
+      - action: notify.mobile_app_your_phone
+        data:
+          title: 🔋 Chef iQ — Battery low ({{ batt }}%)
+          message: '{% if cooking %}Enough for a short cook; charge after.{% else %}Pop it on the charger
+            before your next cook.{% endif %}'
+          data:
+            tag: chefiq_battery
+            group: chefiq
+  mode: single
+  variables:
+    batt: '{{ states(''sensor.chefiq_battery'') }}'
+    cooking: '{{ is_state(''input_boolean.chefiq_cook_active'',''on'') }}'
+- id: chefiq_pasteurized
+  alias: ChefIQ · Pasteurized
+  triggers:
+  - trigger: state
+    entity_id: sensor.chef_iq_safe_to_eat
+    to: Pasteurized
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'on'
+  actions:
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Food safety reached. The {{ states("input_select.chefiq_preset") }} is now pasteurized
+        and safe to eat.
+      volume: 40
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🛡️ Chef iQ — Pasteurized
+      message: Safe (time × temp lethality target reached).
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  mode: single
+- id: chefiq_prealert
+  alias: ChefIQ · Almost There Pre-alert
+  triggers:
+  - trigger: state
+    entity_id: sensor.chefiq_meat_temperature
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.chef_iq_pre_alert_sent
+    state: 'off'
+  - condition: template
+    value_template: '{{ meat > -100 and meat >= (target - lead) and meat < target }}'
+  actions:
+  - action: input_boolean.turn_on
+    target:
+      entity_id: input_boolean.chef_iq_pre_alert_sent
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Almost there. The {{ preset }} is at {{ meat|round(0) }} degrees, {{ (target-meat)|round(0)
+        }} to go. Roughly {{ eta }}.
+      volume: 40
+  - action: notify.mobile_app_your_phone
+    data:
+      title: ⏳ Chef iQ — Almost there
+      message: '{{ meat|round(1) }}°C, {{ (target-meat)|round(1) }}°C to target. ETA {{ eta }}.'
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  mode: single
+  variables:
+    target: '{% set pm = {''Beef · Rare (52°C)'':52,''Beef · Medium Rare (57°C)'':57,''Beef · Medium (63°C)'':63,''Beef
+      · Medium Well (68°C)'':68,''Beef · Well Done (74°C)'':74,''Chicken · Breast (74°C)'':74,''Chicken
+      · Thigh (79°C)'':79,''Turkey (74°C)'':74,''Pork · Medium (63°C)'':63,''Pork · Well (71°C)'':71,''Lamb
+      · Medium Rare (57°C)'':57,''Lamb · Medium (63°C)'':63,''Fish (52°C)'':52,''Burger · Medium (71°C)'':71,''Sous
+      Vide · Steak (55°C)'':55} %}{{ pm.get(states(''input_select.chefiq_preset''), states(''input_number.chefiq_target_temperature'')|float(63))
+      | float(63) }}'
+    meat: '{{ states(''sensor.chefiq_meat_temperature'') | float(-999) }}'
+    rate: '{{ states(''sensor.chefiq_meat_rate'') | float(0) }}'
+    preset: '{{ states(''input_select.chefiq_preset'') }}'
+    lead: '{{ states(''input_number.chef_iq_pre_alert_lead'')|float(5) }}'
+    eta: '{% if rate > 0.05 %}{% set m=((target-meat)/rate)|round(0) %}{% if m<1 %}under a minute{% elif
+      m>600 %}over ten hours{% else %}about {{ m }} minutes{% endif %}{% else %}a little while{% endif
+      %}'
+- id: chefiq_probe_lost
+  alias: ChefIQ · Probe Signal Lost
+  description: Alert if probe stops reporting during an active cook
+  triggers:
+  - trigger: state
+    entity_id: sensor.chefiq_meat_temperature
+    to:
+    - unavailable
+    - unknown
+    for:
+      minutes: 10
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'on'
+  actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      title: ⚠️ Chef iQ — Probe signal lost
+      message: No reading from the probe for 10 min during an active cook. Check the Bluetooth proxy or
+        the probe.
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  - action: persistent_notification.create
+    data:
+      title: Chef iQ — Probe lost
+      message: No probe data for 10 min during cook.
+      notification_id: chefiq_lost
+  mode: single
+- id: chefiq_proof_ready
+  alias: ChefIQ · Proof Ready
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chef_iq_proof_percent
+    above: 99
+  conditions:
+  - condition: state
+    entity_id: input_select.chef_iq_ferment_type
+    state: Pizza dough
+  actions:
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Your pizza dough has reached full proof. Do the poke test, then it is ready to shape and
+        bake.
+      volume: 42
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🍕 Chef iQ — Dough proofed
+      message: 'Full proof reached ({{ states("sensor.chefiq_meat_temperature") }}°C). Poke test: a slow
+        spring-back = ready.'
+      data:
+        tag: chefiq_proof
+        group: chefiq
+  mode: single
+- id: chefiq_proof_reset
+  alias: ChefIQ · Proof Start/Reset
+  triggers:
+  - trigger: state
+    entity_id: input_button.chef_iq_proof_start
+  actions:
+  - action: input_number.set_value
+    target:
+      entity_id: input_number.chef_iq_proof_baseline
+    data:
+      value: '{{ states(''sensor.chef_iq_proof_hours_total'')|float(0) }}'
+  - action: input_datetime.set_datetime
+    target:
+      entity_id: input_datetime.chef_iq_proof_start_time
+    data:
+      datetime: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}'
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🍕 Chef iQ — Proof started
+      message: Tracking your {{ states("input_select.chef_iq_ferment_type") }}. Target {{ states("input_number.chef_iq_proof_target_hours")
+        }}h at 24°C, adjusted live for actual dough temp.
+      data:
+        tag: chefiq_proof
+        group: chefiq
+  mode: single
+- id: chefiq_rest_done
+  alias: ChefIQ · Rest Complete
+  triggers:
+  - trigger: time_pattern
+    minutes: /1
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chef_iq_resting
+    state: 'on'
+  - condition: template
+    value_template: '{{ elapsed|float(0) >= restmin }}'
+  actions:
+  - action: input_boolean.turn_off
+    target:
+      entity_id: input_boolean.chef_iq_resting
+  - action: input_boolean.turn_off
+    target:
+      entity_id: input_boolean.chefiq_alert_sent
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Resting complete. The {{ preset }} is ready to carve and serve.
+      volume: 45
+  - action: notify.mobile_app_your_phone
+    data:
+      title: ✅ Chef iQ — Ready to carve
+      message: Resting done — carve and serve.
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  mode: single
+  variables:
+    preset: '{{ states(''input_select.chefiq_preset'') }}'
+    restmin: '{{ states(''input_number.chef_iq_rest_minutes'')|int(15) }}'
+    elapsed: '{{ (now() - states(''input_datetime.chef_iq_rest_start'')|as_datetime).total_seconds() /
+      60 }}'
+- id: chefiq_rest_start
+  alias: ChefIQ · Rest Started
+  triggers:
+  - trigger: state
+    entity_id: input_boolean.chefiq_cook_active
+    from: 'on'
+    to: 'off'
+  conditions:
+  - condition: template
+    value_template: '{{ meat > -100 and meat >= (target - carry - 10) }}'
+  actions:
+  - action: input_datetime.set_datetime
+    target:
+      entity_id: input_datetime.chef_iq_rest_start
+    data:
+      datetime: '{{ now().strftime(''%Y-%m-%d %H:%M:%S'') }}'
+  - action: input_boolean.turn_on
+    target:
+      entity_id: input_boolean.chef_iq_resting
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Resting now. I will let you know in {{ restmin }} minutes when it is ready to carve.
+      volume: 40
+  mode: single
+  variables:
+    target: '{% set pm = {''Beef · Rare (52°C)'':52,''Beef · Medium Rare (57°C)'':57,''Beef · Medium (63°C)'':63,''Beef
+      · Medium Well (68°C)'':68,''Beef · Well Done (74°C)'':74,''Chicken · Breast (74°C)'':74,''Chicken
+      · Thigh (79°C)'':79,''Turkey (74°C)'':74,''Pork · Medium (63°C)'':63,''Pork · Well (71°C)'':71,''Lamb
+      · Medium Rare (57°C)'':57,''Lamb · Medium (63°C)'':63,''Fish (52°C)'':52,''Burger · Medium (71°C)'':71,''Sous
+      Vide · Steak (55°C)'':55} %}{{ pm.get(states(''input_select.chefiq_preset''), states(''input_number.chefiq_target_temperature'')|float(63))
+      | float(63) }}'
+    meat: '{{ states(''sensor.chefiq_meat_temperature'') | float(-999) }}'
+    rate: '{{ states(''sensor.chefiq_meat_rate'') | float(0) }}'
+    preset: '{{ states(''input_select.chefiq_preset'') }}'
+    carry: '{{ states(''input_number.chef_iq_carryover_offset'')|float(3) }}'
+    restmin: '{{ states(''input_number.chef_iq_rest_minutes'')|int(15) }}'
+- id: chefiq_stall
+  alias: ChefIQ · BBQ Stall Detected
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_rate
+    below: 0.15
+    for:
+      minutes: 20
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.chef_iq_stall_notified
+    state: 'off'
+  - condition: template
+    value_template: '{{ meat >= 60 and meat <= 75 and amb > meat + 12 }}'
+  actions:
+  - action: input_boolean.turn_on
+    target:
+      entity_id: input_boolean.chef_iq_stall_notified
+  - action: notify.mobile_app_your_phone
+    data:
+      title: ⏸️ Chef iQ — The stall
+      message: Meat plateaued at {{ meat|round(1) }}°C (pit {{ amb|round(0) }}°C). Normal evaporative
+        cooling — consider wrapping (Texas crutch) to push through.
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  - action: persistent_notification.create
+    data:
+      title: Chef iQ — Stall
+      message: Plateau at {{ meat|round(1) }}°C. Consider wrapping.
+      notification_id: chefiq_stall
+  mode: single
+  variables:
+    target: '{% set pm = {''Beef · Rare (52°C)'':52,''Beef · Medium Rare (57°C)'':57,''Beef · Medium (63°C)'':63,''Beef
+      · Medium Well (68°C)'':68,''Beef · Well Done (74°C)'':74,''Chicken · Breast (74°C)'':74,''Chicken
+      · Thigh (79°C)'':79,''Turkey (74°C)'':74,''Pork · Medium (63°C)'':63,''Pork · Well (71°C)'':71,''Lamb
+      · Medium Rare (57°C)'':57,''Lamb · Medium (63°C)'':63,''Fish (52°C)'':52,''Burger · Medium (71°C)'':71,''Sous
+      Vide · Steak (55°C)'':55} %}{{ pm.get(states(''input_select.chefiq_preset''), states(''input_number.chefiq_target_temperature'')|float(63))
+      | float(63) }}'
+    meat: '{{ states(''sensor.chefiq_meat_temperature'') | float(-999) }}'
+    rate: '{{ states(''sensor.chefiq_meat_rate'') | float(0) }}'
+    preset: '{{ states(''input_select.chefiq_preset'') }}'
+    amb: '{{ states(''sensor.chefiq_ambient_temperature'')|float(0) }}'
+- id: chefiq_stall_break
+  alias: ChefIQ · Stall Broken
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.chefiq_meat_rate
+    above: 0.4
+    for:
+      minutes: 5
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.chef_iq_stall_notified
+    state: 'on'
+  actions:
+  - action: input_boolean.turn_off
+    target:
+      entity_id: input_boolean.chef_iq_stall_notified
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🔥 Chef iQ — Stall broken
+      message: Temperature climbing again — through the stall.
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  mode: single
+- id: chefiq_target_reached
+  alias: ChefIQ · Pull Point Reached
+  description: Announce pull point (target minus carryover)
+  triggers:
+  - trigger: state
+    entity_id: sensor.chefiq_meat_temperature
+  conditions:
+  - condition: state
+    entity_id: input_boolean.chefiq_cook_active
+    state: 'on'
+  - condition: state
+    entity_id: input_boolean.chefiq_alert_sent
+    state: 'off'
+  - condition: template
+    value_template: '{{ meat > -100 and meat >= (target - carry) }}'
+  actions:
+  - action: input_boolean.turn_on
+    target:
+      entity_id: input_boolean.chefiq_alert_sent
+  - action: script.chefiq_kitchen_announce
+    data:
+      message: Pull it now. The {{ preset }} is at {{ meat|round(0) }} degrees and will carry over to
+        about {{ target|round(0) }}. Rest it before carving.
+      volume: 45
+  - action: notify.mobile_app_your_phone
+    data:
+      title: 🍖 Chef iQ — Pull it now
+      message: '{{ meat|round(1) }}°C — pull now, carries to ~{{ target|round(0) }}°C.'
+      data:
+        tag: chefiq_cook
+        group: chefiq
+  - action: persistent_notification.create
+    data:
+      title: Chef iQ — Pull point
+      message: Meat {{ meat|round(1) }}°C. Pull now (carryover to ~{{ target|round(0) }}°C).
+      notification_id: chefiq_target
+  mode: single
+  variables:
+    target: '{% set pm = {''Beef · Rare (52°C)'':52,''Beef · Medium Rare (57°C)'':57,''Beef · Medium (63°C)'':63,''Beef
+      · Medium Well (68°C)'':68,''Beef · Well Done (74°C)'':74,''Chicken · Breast (74°C)'':74,''Chicken
+      · Thigh (79°C)'':79,''Turkey (74°C)'':74,''Pork · Medium (63°C)'':63,''Pork · Well (71°C)'':71,''Lamb
+      · Medium Rare (57°C)'':57,''Lamb · Medium (63°C)'':63,''Fish (52°C)'':52,''Burger · Medium (71°C)'':71,''Sous
+      Vide · Steak (55°C)'':55} %}{{ pm.get(states(''input_select.chefiq_preset''), states(''input_number.chefiq_target_temperature'')|float(63))
+      | float(63) }}'
+    meat: '{{ states(''sensor.chefiq_meat_temperature'') | float(-999) }}'
+    rate: '{{ states(''sensor.chefiq_meat_rate'') | float(0) }}'
+    preset: '{{ states(''input_select.chefiq_preset'') }}'
+    carry: '{{ states(''input_number.chef_iq_carryover_offset'')|float(3) }}'

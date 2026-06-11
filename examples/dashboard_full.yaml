@@ -1,0 +1,800 @@
+title: ChefIQ Kitchen
+views:
+- title: ChefIQ
+  path: chefiq
+  icon: mdi:thermometer-probe
+  theme: Backend-selected
+  type: sections
+  max_columns: 3
+  sections:
+  - type: grid
+    cards:
+    - type: custom:mushroom-select-card
+      entity: input_select.chef_iq_probe_mode
+      name: Probe Mode
+      icon: mdi:thermometer-lines
+      secondary_info: none
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      header:
+        show: true
+        title: Live Trend (last 2h)
+        show_states: true
+        colorize_states: true
+      graph_span: 2h
+      span:
+        end: minute
+      yaxis:
+      - decimals: 0
+        apex_config:
+          forceNiceScale: true
+          labels:
+            style:
+              colors: '#9bb5d6'
+            formatter: 'EVAL:function(v){return Math.round(v)+''°''}
+
+              '
+      apex_config:
+        chart:
+          height: 280
+          background: transparent
+        legend:
+          labels:
+            colors: '#cfd8dc'
+        grid:
+          borderColor: '#2a3553'
+        xaxis:
+          labels:
+            style:
+              colors: '#9bb5d6'
+        stroke:
+          curve: smooth
+      series:
+      - entity: sensor.chefiq_meat_temperature
+        name: Meat
+        color: '#ff3d00'
+        stroke_width: 4
+        type: line
+        extend_to: now
+        show:
+          legend_value: true
+          extremas: true
+      - entity: sensor.chefiq_ambient_temperature
+        name: Ambient
+        color: '#ffab00'
+        stroke_width: 3
+        type: line
+        extend_to: now
+        opacity: 0.85
+      - entity: sensor.chefiq_probe_tip
+        name: Ring 1
+        color: '#29b6f6'
+        stroke_width: 2
+        type: line
+        extend_to: now
+        opacity: 0.75
+        show:
+          legend_value: true
+      - entity: sensor.chefiq_probe_ring_1
+        name: Ring 2
+        color: '#ab47bc'
+        stroke_width: 2
+        type: line
+        extend_to: now
+        opacity: 0.75
+        show:
+          legend_value: true
+      - entity: input_number.chefiq_target_temperature
+        name: Target
+        color: '#00e676'
+        stroke_width: 2
+        curve: stepline
+        type: line
+        extend_to: now
+        opacity: 0.8
+        show:
+          legend_value: true
+      card_mod:
+        style: 'ha-card { background:#0f1626; border:none; box-shadow: 0 4px 16px rgba(0,0,0,.4);}'
+    - type: logbook
+      title: Cook Activity
+      entities:
+      - sensor.chefiq_meat_temperature
+      - sensor.chefiq_ambient_temperature
+      - input_boolean.chefiq_cook_active
+      - input_select.chefiq_preset
+      hours_to_show: 12
+  - type: grid
+    cards:
+    - type: vertical-stack
+      cards:
+      - type: markdown
+        content: '### 🧑‍🍳 AI Cook Setup
+
+          Describe what you are cooking, then press **Apply**. The AI sets the probe mode, food-safety
+          type, target temp, carryover, pre-alert and rest, then starts the cook.
+
+
+          **Plan:** {{ states(''input_text.chef_iq_cook_plan'') }}'
+      - type: entities
+        show_header_toggle: false
+        entities:
+        - entity: input_text.chef_iq_cook_request
+          name: What are you cooking?
+          icon: mdi:text-box-edit
+        - entity: input_button.chef_iq_cook_setup
+          name: Apply with AI
+          icon: mdi:robot-excited
+        - entity: input_button.chef_iq_cook_end
+          name: End cook session
+          icon: mdi:stop-circle-outline
+    - type: markdown
+      content: '### 🤖 AI Cook Coach
+
+        {{ states(''input_text.chef_iq_ai_coach'') }}
+
+
+        *Updated {{ relative_time(states(''input_datetime.chef_iq_ai_coach_updated'') | as_datetime) if
+        states(''input_datetime.chef_iq_ai_coach_updated'') not in [''unknown'',''unavailable''] else
+        ''never'' }} ago · AI*'
+    - type: entities
+      entities:
+      - entity: input_boolean.chef_iq_ai_announce
+        name: Announce insights on Sonos
+      - entity: input_number.chef_iq_announce_boost
+        name: Announce loudness (above music)
+        icon: mdi:volume-plus
+  - type: grid
+    cards:
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        primary: Chef iQ · CQ60
+        secondary: '{% if is_state(''input_boolean.chefiq_cook_active'',''on'') %}Cooking · started {{
+          relative_time(states(''input_datetime.chefiq_cook_start'') | as_datetime) }} ago{% else %}Idle
+          · ready to cook{% endif %}'
+        icon: mdi:thermometer-probe
+        badge_icon: '{% if is_state(''input_boolean.chefiq_cook_active'',''on'') %}mdi:fire{% endif %}'
+        badge_color: orange
+        tap_action:
+          action: none
+        color: '{% if is_state(''input_boolean.chefiq_cook_active'',''on'') %}red{% else %}grey{% endif
+          %}'
+        features_position: bottom
+        multiline_secondary: true
+        card_mod:
+          style: 'ha-card { background: linear-gradient(135deg,#1a1a2e 0%,#0f3460 100%) !important; border:none
+            !important; box-shadow: 0 4px 14px rgba(0,0,0,0.4) !important; --primary-text-color:#fff !important;
+            --secondary-text-color:#cfd8dc !important;}'
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chefiq_battery'') | int(0) }}%'
+        secondary: Battery
+        icon: '{% set b = states(''sensor.chefiq_battery'') | int(0) %}{% if b > 90 %}mdi:battery{% elif
+          b > 70 %}mdi:battery-80{% elif b > 50 %}mdi:battery-60{% elif b > 30 %}mdi:battery-40{% elif
+          b > 10 %}mdi:battery-20{% else %}mdi:battery-alert{% endif %}'
+        icon_color: '{% set b = states(''sensor.chefiq_battery'') | int(0) %}{% if b > 50 %}green{% elif
+          b > 20 %}amber{% else %}red{% endif %}'
+        tap_action:
+          action: none
+        card_mod:
+          style: ha-card { background:#1a1a2e !important; border:none !important; --primary-text-color:#fff
+            !important; --secondary-text-color:#9bb5d6 !important;}
+      - type: custom:mushroom-template-card
+        primary: '{% set v = states(''sensor.chefiq_signal'') %}{% if v in [''unavailable'',''unknown'',''none'']
+          %}— dBm{% else %}{{ v | int(-100) }} dBm{% endif %}'
+        secondary: Signal
+        icon: '{% set r = states(''sensor.chefiq_signal'') | int(-100) %}{% if r > -60 %}mdi:wifi-strength-4{%
+          elif r > -75 %}mdi:wifi-strength-3{% elif r > -85 %}mdi:wifi-strength-2{% else %}mdi:wifi-strength-1{%
+          endif %}'
+        icon_color: '{% set r = states(''sensor.chefiq_signal'') | int(-100) %}{% if r > -75 %}green{%
+          elif r > -85 %}amber{% else %}red{% endif %}'
+        tap_action:
+          action: none
+        card_mod:
+          style: ha-card { background:#1a1a2e !important; border:none !important; --primary-text-color:#fff
+            !important; --secondary-text-color:#9bb5d6 !important;}
+    - type: vertical-stack
+      cards:
+      - type: custom:mushroom-title-card
+        title: 🍖 Meat Temperature
+      - type: gauge
+        entity: sensor.chefiq_meat_temperature
+        name: Internal
+        min: 0
+        max: 110
+        needle: true
+        severity:
+          green: 60
+          yellow: 75
+          red: 90
+        unit: °C
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chefiq_meat_rate'') | float(0) | round(1) }}°/min'
+        secondary: Rate of rise
+        icon: '{% set r = states(''sensor.chefiq_meat_rate'')|float(0) %}{% if r > 0.1 %}mdi:trending-up{%
+          elif r < -0.1 %}mdi:trending-down{% else %}mdi:trending-neutral{% endif %}'
+        icon_color: '{% set r = states(''sensor.chefiq_meat_rate'')|float(0) %}{% if r > 0.5 %}red{% elif
+          r > 0.1 %}orange{% elif r < -0.1 %}blue{% else %}grey{% endif %}'
+      - type: custom:mushroom-template-card
+        primary: '{% set m = states(''sensor.chefiq_meat_temperature'')|float(0) %}{% set tgt = states(''input_number.chefiq_target_temperature'')|float(0)
+          %}{% set r = states(''sensor.chefiq_meat_rate'')|float(0) %}{% if m == 0 %}—{% elif m >= tgt
+          %}Ready ✓{% elif r > 0.05 %}{% set mins = ((tgt - m) / r) | round(0) %}{% if mins < 1 %}<1 min{%
+          elif mins > 600 %}>10 h{% else %}~{{ mins }} min{% endif %}{% else %}—{% endif %}'
+        secondary: ETA to target
+        icon: mdi:clock-fast
+        icon_color: '{% set m = states(''sensor.chefiq_meat_temperature'')|float(0) %}{% set tgt = states(''input_number.chefiq_target_temperature'')|float(0)
+          %}{% if m > 0 and m >= tgt %}green{% else %}blue{% endif %}'
+    - type: custom:mushroom-template-card
+      primary: '{% set m = states(''sensor.chefiq_meat_temperature'') | float(0) %}{% if m == 0 %}— Awaiting
+        probe —{% elif m < 49 %}Cold / Raw{% elif m < 54 %}Rare{% elif m < 60 %}Medium Rare{% elif m <
+        66 %}Medium{% elif m < 71 %}Medium Well{% elif m < 76 %}Well Done{% else %}Overcooked — pull now!{%
+        endif %}'
+      secondary: '{% set m = states(''sensor.chefiq_meat_temperature'') | float(0) %}Current internal
+        · {{ m | round(1) }}°C / {{ ((m * 9 / 5) + 32) | round(0) }}°F'
+      icon: '{% set m = states(''sensor.chefiq_meat_temperature'') | float(0) %}{% if m < 49 %}mdi:snowflake{%
+        elif m < 60 %}mdi:food-steak{% elif m < 71 %}mdi:food-drumstick{% else %}mdi:fire-alert{% endif
+        %}'
+      tap_action:
+        action: none
+      color: '{% set m = states(''sensor.chefiq_meat_temperature'') | float(0) %}{% if m < 49 %}blue{%
+        elif m < 54 %}deep-purple{% elif m < 60 %}pink{% elif m < 66 %}red{% elif m < 71 %}deep-orange{%
+        elif m < 76 %}brown{% else %}grey{% endif %}'
+      features_position: bottom
+      card_mod:
+        style: ha-card { background:linear-gradient(90deg,#1a1a2e 0%,#16213e 100%) !important; border:none
+          !important; box-shadow:0 4px 12px rgba(0,0,0,.4) !important; --primary-text-color:#fff !important;
+          --secondary-text-color:#cfd8dc !important;}
+      grid_options:
+        columns: full
+    - type: grid
+      columns: 3
+      square: false
+      cards:
+      - type: custom:mushroom-template-card
+        primary: '{{ ({''Beef · Rare (52°C)'':52,''Beef · Medium Rare (57°C)'':57,''Beef · Medium (63°C)'':63,''Beef
+          · Medium Well (68°C)'':68,''Beef · Well Done (74°C)'':74,''Chicken · Breast (74°C)'':74,''Chicken
+          · Thigh (79°C)'':79,''Turkey (74°C)'':74,''Pork · Medium (63°C)'':63,''Pork · Well (71°C)'':71,''Lamb
+          · Medium Rare (57°C)'':57,''Lamb · Medium (63°C)'':63,''Fish (52°C)'':52,''Burger · Medium (71°C)'':71,''Sous
+          Vide · Steak (55°C)'':55}).get(states(''input_select.chefiq_preset''), states(''input_number.chefiq_target_temperature'')
+          | float(63)) }}°C'
+        secondary: Target
+        icon: mdi:target
+        icon_color: blue
+        layout: vertical
+        fill_container: true
+        tap_action:
+          action: none
+        card_mod:
+          style: ha-card { background:#1a1a2e !important; border:none !important; height:96px; --primary-text-color:#fff
+            !important; --secondary-text-color:#9bb5d6 !important;}
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chefiq_ambient_temperature'') | float(0) | round(0) }}°C'
+        secondary: Ambient · Pit
+        icon: mdi:fire-circle
+        icon_color: '{% set a = states(''sensor.chefiq_ambient_temperature'') | float(0) %}{% if a > 200
+          %}red{% elif a > 100 %}orange{% elif a > 50 %}amber{% else %}grey{% endif %}'
+        layout: vertical
+        fill_container: true
+        tap_action:
+          action: none
+        card_mod:
+          style: ha-card { background:#1a1a2e !important; border:none !important; height:96px; --primary-text-color:#fff
+            !important; --secondary-text-color:#9bb5d6 !important;}
+      - type: custom:mushroom-template-card
+        primary: '{% set m = states(''sensor.chefiq_meat_temperature'') | float(0) %}{% set tgt = (({''Beef
+          · Rare (52°C)'':52,''Beef · Medium Rare (57°C)'':57,''Beef · Medium (63°C)'':63,''Beef · Medium
+          Well (68°C)'':68,''Beef · Well Done (74°C)'':74,''Chicken · Breast (74°C)'':74,''Chicken · Thigh
+          (79°C)'':79,''Turkey (74°C)'':74,''Pork · Medium (63°C)'':63,''Pork · Well (71°C)'':71,''Lamb
+          · Medium Rare (57°C)'':57,''Lamb · Medium (63°C)'':63,''Fish (52°C)'':52,''Burger · Medium (71°C)'':71,''Sous
+          Vide · Steak (55°C)'':55}).get(states(''input_select.chefiq_preset''), states(''input_number.chefiq_target_temperature'')
+          | float(63))) | float(63) %}{% set delta = tgt - m %}{% if delta <= 0 %}DONE{% else %}{{ delta
+          | round(1) }}°{% endif %}'
+        secondary: '{% set m = states(''sensor.chefiq_meat_temperature'') | float(0) %}{% set tgt = (({''Beef
+          · Rare (52°C)'':52,''Beef · Medium Rare (57°C)'':57,''Beef · Medium (63°C)'':63,''Beef · Medium
+          Well (68°C)'':68,''Beef · Well Done (74°C)'':74,''Chicken · Breast (74°C)'':74,''Chicken · Thigh
+          (79°C)'':79,''Turkey (74°C)'':74,''Pork · Medium (63°C)'':63,''Pork · Well (71°C)'':71,''Lamb
+          · Medium Rare (57°C)'':57,''Lamb · Medium (63°C)'':63,''Fish (52°C)'':52,''Burger · Medium (71°C)'':71,''Sous
+          Vide · Steak (55°C)'':55}).get(states(''input_select.chefiq_preset''), states(''input_number.chefiq_target_temperature'')
+          | float(63))) | float(63) %}{% if m >= tgt %}Target reached{% else %}To target{% endif %}'
+        icon: '{% set m = states(''sensor.chefiq_meat_temperature'') | float(0) %}{% set tgt = (({''Beef
+          · Rare (52°C)'':52,''Beef · Medium Rare (57°C)'':57,''Beef · Medium (63°C)'':63,''Beef · Medium
+          Well (68°C)'':68,''Beef · Well Done (74°C)'':74,''Chicken · Breast (74°C)'':74,''Chicken · Thigh
+          (79°C)'':79,''Turkey (74°C)'':74,''Pork · Medium (63°C)'':63,''Pork · Well (71°C)'':71,''Lamb
+          · Medium Rare (57°C)'':57,''Lamb · Medium (63°C)'':63,''Fish (52°C)'':52,''Burger · Medium (71°C)'':71,''Sous
+          Vide · Steak (55°C)'':55}).get(states(''input_select.chefiq_preset''), states(''input_number.chefiq_target_temperature'')
+          | float(63))) | float(63) %}{% if m >= tgt %}mdi:check-circle{% else %}mdi:thermometer-chevron-up{%
+          endif %}'
+        icon_color: '{% set m = states(''sensor.chefiq_meat_temperature'') | float(0) %}{% set tgt = (({''Beef
+          · Rare (52°C)'':52,''Beef · Medium Rare (57°C)'':57,''Beef · Medium (63°C)'':63,''Beef · Medium
+          Well (68°C)'':68,''Beef · Well Done (74°C)'':74,''Chicken · Breast (74°C)'':74,''Chicken · Thigh
+          (79°C)'':79,''Turkey (74°C)'':74,''Pork · Medium (63°C)'':63,''Pork · Well (71°C)'':71,''Lamb
+          · Medium Rare (57°C)'':57,''Lamb · Medium (63°C)'':63,''Fish (52°C)'':52,''Burger · Medium (71°C)'':71,''Sous
+          Vide · Steak (55°C)'':55}).get(states(''input_select.chefiq_preset''), states(''input_number.chefiq_target_temperature'')
+          | float(63))) | float(63) %}{% if m >= tgt %}green{% elif tgt - m < 5 %}orange{% else %}red{%
+          endif %}'
+        layout: vertical
+        fill_container: true
+        tap_action:
+          action: none
+        card_mod:
+          style: ha-card { background:#1a1a2e !important; border:none !important; height:96px; --primary-text-color:#fff
+            !important; --secondary-text-color:#9bb5d6 !important;}
+  - type: grid
+    cards:
+    - type: custom:mushroom-template-card
+      primary: '{% if is_state(''input_boolean.chefiq_cook_active'',''on'') %}{% set ts = state_attr(''input_datetime.chefiq_cook_start'',''timestamp'')
+        %}{% if ts %}{% set delta = (now().timestamp() - ts) | int %}{% set h = (delta // 3600) %}{% set
+        m = (delta % 3600) // 60 %}{% set sec = delta % 60 %}{{ ''%02d:%02d:%02d'' % (h, m, sec) }}{%
+        else %}--:--:--{% endif %}{% else %}--:--:--{% endif %}'
+      secondary: '{% if is_state(''input_boolean.chefiq_cook_active'',''on'') %}Cook elapsed{% else %}Timer
+        idle{% endif %}'
+      icon: '{% if is_state(''input_boolean.chefiq_cook_active'',''on'') %}mdi:timer-sand{% else %}mdi:timer-outline{%
+        endif %}'
+      icon_color: '{% if is_state(''input_boolean.chefiq_cook_active'',''on'') %}orange{% else %}grey{%
+        endif %}'
+      tap_action:
+        action: none
+      card_mod:
+        style: ha-card { background:linear-gradient(135deg,#16213e 0%,#0f3460 100%) !important; border:none
+          !important; box-shadow:0 4px 12px rgba(0,0,0,.4) !important; --primary-text-color:#fff !important;
+          --secondary-text-color:#9bb5d6 !important;}
+    - type: vertical-stack
+      cards:
+      - type: custom:mushroom-title-card
+        title: Cook Setup
+        card_mod:
+          style: .title{color:#fff!important;}
+      - type: entities
+        entities:
+        - entity: input_select.chefiq_preset
+          name: Preset
+          icon: mdi:silverware-fork-knife
+        - entity: input_number.chefiq_target_temperature
+          name: Custom Target (°C)
+          icon: mdi:target
+        card_mod:
+          style: ha-card { background:#1a1a2e; border:none;} .card-content{color:#fff!important;}
+      - type: horizontal-stack
+        cards:
+        - type: custom:mushroom-template-card
+          primary: Start Cook
+          secondary: Begin timer
+          icon: mdi:play-circle
+          icon_color: green
+          tap_action:
+            action: perform-action
+            perform_action: script.chefiq_start_cook
+            data: {}
+            target: {}
+          hold_action:
+            action: none
+          double_tap_action:
+            action: none
+          card_mod:
+            style: 'ha-card { background: linear-gradient(135deg,#0a3d20 0%,#1a5e35 100%) !important;
+              border:none !important; cursor:pointer; --primary-text-color:#fff !important; --secondary-text-color:#a5d6a7
+              !important;}'
+        - type: custom:mushroom-template-card
+          primary: Stop Cook
+          secondary: End timer
+          icon: mdi:stop-circle
+          icon_color: red
+          tap_action:
+            action: perform-action
+            perform_action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.chefiq_cook_active
+          card_mod:
+            style: 'ha-card { background: linear-gradient(135deg,#3d0a0a 0%,#5e1a1a 100%) !important;
+              border:none !important; cursor:pointer; --primary-text-color:#fff !important; --secondary-text-color:#ef9a9a
+              !important;}'
+    - type: vertical-stack
+      cards:
+      - type: custom:mushroom-title-card
+        title: Probe Thermal Map
+        subtitle: Tip → Black-end ring sensors + ambient
+        card_mod:
+          style: .title{color:#fff!important;} .subtitle{color:#9bb5d6!important;}
+      - type: grid
+        columns: 5
+        square: false
+        cards:
+        - type: custom:mushroom-template-card
+          primary: '{% set v = states(''sensor.chefiq_meat_temperature'') %}{% if v in [''unavailable'',''unknown'',''none'']
+            %}—{% else %}{{ v | float(0) | round(1) }}°{% endif %}'
+          secondary: Tip
+          icon: mdi:circle-medium
+          icon_color: red
+          layout: vertical
+          fill_container: true
+          tap_action:
+            action: none
+          card_mod:
+            style: ha-card { background:#1a1a2e !important; border:none !important; height:84px; --primary-text-color:#fff
+              !important; --secondary-text-color:#9bb5d6 !important;}
+        - type: custom:mushroom-template-card
+          primary: '{% set v = states(''sensor.chefiq_probe_tip'') %}{% if v in [''unavailable'',''unknown'',''none'']
+            %}—{% else %}{{ v | float(0) | round(1) }}°{% endif %}'
+          secondary: Ring 1
+          icon: mdi:circle-medium
+          icon_color: deep-orange
+          layout: vertical
+          fill_container: true
+          tap_action:
+            action: none
+          card_mod:
+            style: ha-card { background:#1a1a2e !important; border:none !important; height:84px; --primary-text-color:#fff
+              !important; --secondary-text-color:#9bb5d6 !important;}
+        - type: custom:mushroom-template-card
+          primary: '{% set v = states(''sensor.chefiq_probe_ring_1'') %}{% if v in [''unavailable'',''unknown'',''none'']
+            %}—{% else %}{{ v | float(0) | round(1) }}°{% endif %}'
+          secondary: Ring 2
+          icon: mdi:circle-medium
+          icon_color: orange
+          layout: vertical
+          fill_container: true
+          tap_action:
+            action: none
+          card_mod:
+            style: ha-card { background:#1a1a2e !important; border:none !important; height:84px; --primary-text-color:#fff
+              !important; --secondary-text-color:#9bb5d6 !important;}
+        - type: custom:mushroom-template-card
+          primary: '{% set v = states(''sensor.chefiq_ambient_temperature'') %}{% if v in [''unavailable'',''unknown'',''none'']
+            %}—{% else %}{{ v | float(0) | round(1) }}°{% endif %}'
+          secondary: Ambient
+          icon: mdi:circle-medium
+          icon_color: yellow
+          layout: vertical
+          fill_container: true
+          tap_action:
+            action: none
+          card_mod:
+            style: ha-card { background:#1a1a2e !important; border:none !important; height:84px; --primary-text-color:#fff
+              !important; --secondary-text-color:#9bb5d6 !important;}
+  - type: grid
+    cards:
+    - type: custom:mushroom-title-card
+      title: 🛡️ Food Safety
+      subtitle: Guidance only · follow USDA minimums for at-risk diners
+    - type: entities
+      entities:
+      - entity: input_select.chef_iq_meat_type
+        name: Meat type (sets safety target)
+        icon: mdi:food-steak
+      card_mod:
+        style: ha-card { background:#0f1626; border:none; }
+    - type: custom:mushroom-template-card
+      primary: '{{ states(''sensor.chef_iq_food_safety'') }}'
+      secondary: Overall status
+      icon: '{% set v=states(''sensor.chef_iq_food_safety'') %}{% if ''✅'' in v %}mdi:shield-check{% elif
+        ''⚠'' in v or ''UNSAFE'' in v or ''HURRY'' in v %}mdi:shield-alert{% elif ''⏳'' in v or ''Pasteuriz''
+        in v %}mdi:shield-sync{% elif ''❄'' in v %}mdi:shield-snowflake{% else %}mdi:shield-outline{%
+        endif %}'
+      icon_color: '{% set v=states(''sensor.chef_iq_food_safety'') %}{% if ''✅'' in v %}green{% elif ''⚠''
+        in v or ''UNSAFE'' in v %}red{% elif ''HURRY'' in v %}orange{% elif ''⏳'' in v or ''Pasteuriz''
+        in v %}amber{% elif ''❄'' in v %}light-blue{% else %}grey{% endif %}'
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_pasteurization'') }}%'
+        secondary: Pasteurization
+        icon: '{% if is_state(''sensor.chef_iq_safe_to_eat'',''Pasteurized'') %}mdi:shield-check{% else
+          %}mdi:shield-half-full{% endif %}'
+        icon_color: '{% set p=states(''sensor.chef_iq_pasteurization'')|float(0) %}{% if p>=100 %}green{%
+          elif p>=50 %}amber{% elif p>0 %}orange{% else %}grey{% endif %}'
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_safe_to_eat'') }}'
+        secondary: Lethality (time × temp)
+        icon: mdi:bacteria
+        icon_color: '{% if is_state(''sensor.chef_iq_safe_to_eat'',''Pasteurized'') %}green{% elif is_state(''sensor.chef_iq_safe_to_eat'',''In
+          progress'') %}amber{% else %}grey{% endif %}'
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        primary: '{% set d=states(''sensor.chef_iq_danger_zone_time'')|float(0) %}{% if d<=0 %}—{% elif
+          d<60 %}{{ d|int }} min{% else %}{{ (d/60)|round(1) }} h{% endif %}'
+        secondary: Time in danger zone
+        icon: mdi:timer-alert
+        icon_color: '{% set d=states(''sensor.chef_iq_danger_zone_time'')|float(0) %}{% if d>=240 %}red{%
+          elif d>=120 %}orange{% elif d>0 %}amber{% else %}grey{% endif %}'
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_hot_hold_safety'') }}'
+        secondary: Hot-hold
+        icon: mdi:pot-steam
+        icon_color: '{% set h=states(''sensor.chef_iq_hot_hold_safety'') %}{% if ''Safe'' in h %}green{%
+          elif ''Cooling'' in h %}amber{% elif ''Out'' in h %}red{% else %}grey{% endif %}'
+    - type: custom:mushroom-template-card
+      primary: '{{ states(''sensor.chef_iq_cooling_safety'') }}'
+      secondary: Rapid-cooling (FDA 2-stage)
+      icon: mdi:snowflake-alert
+      icon_color: '{% set c=states(''sensor.chef_iq_cooling_safety'') %}{% if ''UNSAFE'' in c %}red{%
+        elif ''HURRY'' in c %}orange{% elif ''Chilled'' in c %}green{% elif ''track'' in c %}light-blue{%
+        else %}grey{% endif %}'
+  - type: grid
+    cards:
+    - type: custom:mushroom-title-card
+      title: 🧪 Cooking Intelligence
+      subtitle: Physics-derived insights from the probe
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        primary: '{% set e = states(''sensor.chef_iq_eta_to_target'') %}{% if e in [''unknown'',''unavailable'']
+          %}—{% else %}{{ e }} min{% endif %}'
+        secondary: Smart ETA (Newton)
+        icon: mdi:timer-sand-complete
+        icon_color: blue
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_predicted_final_temp'') }}°'
+        secondary: Final after rest
+        icon: mdi:thermometer-check
+        icon_color: deep-orange
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        primary: +{{ states('sensor.chef_iq_dynamic_carryover') }}°
+        secondary: Carryover
+        icon: mdi:thermometer-chevron-up
+        icon_color: orange
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_rested_temp'') }}°'
+        secondary: Settles to
+        icon: mdi:bed
+        icon_color: indigo
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_juiciness'') }}%'
+        secondary: Juiciness (if pulled now)
+        icon: '{% set j=states(''sensor.chef_iq_juiciness'')|float(0) %}{% if j>=90 %}mdi:water{% elif
+          j>=70 %}mdi:water-minus{% else %}mdi:water-off{% endif %}'
+        icon_color: '{% set j=states(''sensor.chef_iq_juiciness'')|float(0) %}{% if j>=90 %}light-blue{%
+          elif j>=70 %}amber{% else %}red{% endif %}'
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_doneness_spread'') }}°'
+        secondary: Edge-to-edge spread
+        icon: '{% set s=states(''sensor.chef_iq_doneness_spread'')|float(0) %}{% if s<=5 %}mdi:circle-slice-8{%
+          else %}mdi:circle-slice-4{% endif %}'
+        icon_color: '{% set s=states(''sensor.chef_iq_doneness_spread'')|float(0) %}{% if s<=5 %}green{%
+          elif s<=12 %}amber{% else %}red{% endif %}'
+    - type: horizontal-stack
+      cards:
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_cook_phase'') }}'
+        secondary: Cook phase
+        icon: '{% set p=states(''sensor.chef_iq_cook_phase'') %}{% if p==''Stalling'' %}mdi:pause-octagon{%
+          elif p==''Resting'' %}mdi:sleep{% elif p in [''Done'',''Overshoot''] %}mdi:check-circle{% elif
+          p==''Approaching'' %}mdi:bell-ring{% else %}mdi:fire{% endif %}'
+        icon_color: '{% set p=states(''sensor.chef_iq_cook_phase'') %}{% if p==''Overshoot'' %}red{% elif
+          p==''Done'' %}green{% elif p==''Approaching'' %}amber{% elif p==''Stalling'' %}deep-orange{%
+          elif p==''Heating'' %}orange{% else %}grey{% endif %}'
+      - type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_braise_tenderness'') }}%'
+        secondary: Braise tenderness
+        icon: mdi:knife
+        icon_color: brown
+  - type: grid
+    cards:
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Fridge
+      card:
+        type: custom:mushroom-title-card
+        title: ❄️ Fridge / Cold-Chain
+        subtitle: Bacterial-growth monitoring (Ratkowsky model)
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Fridge
+      card:
+        type: entities
+        entities:
+        - entity: input_select.chef_iq_probe_mode
+          name: Probe mode
+          icon: mdi:thermometer-lines
+        card_mod:
+          style: ha-card { background:#0f1626; border:none; }
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Fridge
+      card:
+        type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_cold_chain'') }}'
+        secondary: Cold-chain status
+        icon: '{% set c=states(''sensor.chef_iq_cold_chain'') %}{% if ''⚠'' in c %}mdi:fridge-alert{%
+          elif ''✅'' in c %}mdi:fridge-outline{% else %}mdi:fridge{% endif %}'
+        icon_color: '{% set c=states(''sensor.chef_iq_cold_chain'') %}{% if ''Breach'' in c %}red{% elif
+          ''Warming'' in c %}orange{% elif ''intact'' in c or ''OK'' in c %}green{% else %}grey{% endif
+          %}'
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Fridge
+      card:
+        type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_fridge_status'') }}'
+        secondary: 'Temperature (FSIS: keep ≤4°C)'
+        icon: mdi:thermometer
+        icon_color: '{% set s=states(''sensor.chef_iq_fridge_status'') %}{% if ''DANGER'' in s %}red{%
+          elif ''Too warm'' in s %}orange{% elif ''Ideal'' in s %}green{% elif ''OK'' in s %}light-green{%
+          elif ''Freezing'' in s %}light-blue{% else %}grey{% endif %}'
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Fridge
+      card:
+        type: horizontal-stack
+        cards:
+        - type: custom:mushroom-template-card
+          primary: '{{ states(''sensor.chef_iq_bacteria_growth_factor'') }}×'
+          secondary: Bacteria growth vs ideal
+          icon: '{% set g=states(''sensor.chef_iq_bacteria_growth_factor'')|float(1) %}{% if g>2 %}mdi:bacteria{%
+            elif g>1.2 %}mdi:bacteria-outline{% else %}mdi:shield-check{% endif %}'
+          icon_color: '{% set g=states(''sensor.chef_iq_bacteria_growth_factor'')|float(1) %}{% if g>2
+            %}red{% elif g>1.3 %}orange{% elif g>1 %}amber{% else %}green{% endif %}'
+        - type: custom:mushroom-template-card
+          primary: '{{ states(''sensor.chef_iq_shelf_life_factor'') }}×'
+          secondary: Food lasts (vs 3°C)
+          icon: mdi:calendar-clock
+          icon_color: '{% set s=states(''sensor.chef_iq_shelf_life_factor'')|float(1) %}{% if s>=1 %}green{%
+            elif s>=0.7 %}amber{% else %}red{% endif %}'
+  - type: grid
+    cards:
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Fermenting
+      card:
+        type: custom:mushroom-title-card
+        title: Fermenting / Proofing
+        subtitle: Culture-temperature coaching
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Fermenting
+      card:
+        type: entities
+        entities:
+        - entity: input_select.chef_iq_ferment_type
+          name: What are you fermenting?
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Fermenting
+      card:
+        type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_ferment_status'') }}'
+        secondary: '{{ states(''sensor.chef_iq_ferment_target'') }}'
+        icon: mdi:thermometer
+        icon_color: green
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Fermenting
+      card:
+        type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_ferment_speed'') }}x'
+        secondary: Fermentation speed vs ideal
+        icon: mdi:speedometer
+        icon_color: blue
+  - type: grid
+    cards:
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_ferment_type
+        state: Pizza dough
+      card:
+        type: custom:mushroom-title-card
+        title: Pizza Dough Proof
+        subtitle: Temperature-compensated proof tracking
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_ferment_type
+        state: Pizza dough
+      card:
+        type: entities
+        entities:
+        - entity: input_number.chef_iq_proof_target_hours
+          name: Target proof (hours at 24C)
+        - entity: input_button.chef_iq_proof_start
+          name: Start / reset proof
+          icon: mdi:play-circle
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_ferment_type
+        state: Pizza dough
+      card:
+        type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_proof_status'') }}'
+        secondary: '{% set e=states(''sensor.chef_iq_proof_eta'') %}{% if e not in [''unknown'',''0'',''unavailable'']
+          %}Ready in ~{{ e }} min{% else %}Press start to begin{% endif %}'
+        icon: '{% set p=states(''sensor.chef_iq_proof_percent'')|float(0) %}{% if p>=100 and p<=120 %}mdi:check-circle{%
+          elif p>120 %}mdi:alert-circle{% elif p>=80 %}mdi:progress-clock{% else %}mdi:bread-slice-outline{%
+          endif %}'
+        icon_color: '{% set p=states(''sensor.chef_iq_proof_percent'')|float(0) %}{% if p>=100 and p<=120
+          %}green{% elif p>120 %}red{% elif p>=80 %}amber{% elif p>=5 %}orange{% else %}grey{% endif %}'
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_ferment_type
+        state: Pizza dough
+      card:
+        type: custom:bar-card
+        entity: sensor.chef_iq_proof_percent
+        name: Proof
+        min: 0
+        max: 100
+        severity:
+        - from: 0
+          to: 79
+          color: '#ff9800'
+        - from: 80
+          to: 100
+          color: '#4caf50'
+        - from: 100
+          to: 150
+          color: '#f44336'
+        positions:
+          icon: 'off'
+          indicator: 'off'
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_ferment_type
+        state: Pizza dough
+      card:
+        type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_dough_temp_tip'') }}'
+        secondary: Dough temperature
+        icon: mdi:thermometer
+        icon_color: '{% set s=states(''sensor.chef_iq_dough_temp_tip'') %}{% if ''Good'' in s %}green{%
+          elif ''Cool'' in s %}light-blue{% elif ''Warm'' in s %}orange{% elif ''Hot'' in s %}red{% else
+          %}grey{% endif %}'
+  - type: grid
+    cards:
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Tempering chocolate
+      card:
+        type: custom:mushroom-title-card
+        title: Chocolate Tempering
+        subtitle: Guided melt to working temp
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Tempering chocolate
+      card:
+        type: entities
+        entities:
+        - entity: input_select.chef_iq_chocolate_type
+          name: Chocolate type
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: input_select.chef_iq_probe_mode
+        state: Tempering chocolate
+      card:
+        type: custom:mushroom-template-card
+        primary: '{{ states(''sensor.chef_iq_temper_stage'') }}'
+        secondary: '{{ states(''sensor.chef_iq_temper_target'') }}'
+        icon: mdi:candy
+        icon_color: deep-orange

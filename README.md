@@ -11,6 +11,8 @@ A native Home Assistant integration for the **Chef iQ CQ60 Smart Wireless Meat T
 
 ## Quick links
 
+* 🍳 **Full smart‑kitchen dashboard (with screenshots):** [`Docs/DASHBOARD.md`](Docs/DASHBOARD.md)
+* 🤖 **All 27 automations + scripts:** [`Docs/AUTOMATIONS.md`](Docs/AUTOMATIONS.md)
 * 📊 **Single‑probe dashboard:** [`examples/dashboard.yaml`](examples/dashboard.yaml)
 * 📊 **Four‑probe dashboard:** [`examples/dashboard_multi_probe.yaml`](examples/dashboard_multi_probe.yaml)
 * 🛠️ **Install:** [HACS — recommended](#install-hacs--recommended) · [Manual](#install-manual)
@@ -78,9 +80,27 @@ Two ready‑to‑paste Lovelace dashboards live in [`examples/`](examples/). Bot
 
 Both examples assume the default auto‑generated entity IDs (`sensor.chef_iq_cq60_*`, `sensor.chef_iq_cq60_2_*`, …). If you've renamed your devices to something more descriptive (highly recommended — see [Multiple probes](#multiple-probes)), do a find/replace on the entity prefix once and you're done.
 
-### Full "wow factor" dashboard
+### Full “smart kitchen” dashboard
 
-The richer dashboard with a doneness gauge, ring chart, cook‑state banner, target‑temp slider, preset picker and live trend (the one in the project screenshot) is published as a Python generator in the [HASS MCP repo](https://github.com/ITSpecialist111/HASS-MCP) — point it at your HA URL + Long‑Lived Access Token and it republishes the dashboard idempotently. It also creates the supporting helpers (`input_number.chefiq_target`, etc.) and a doneness template sensor.
+The richer dashboard from the project screenshots — doneness gauge, per‑ring thermal map, live
+trend, a **Food Safety** column (pasteurization, lethality, danger‑zone, hot‑hold, rapid‑cooling), a
+**Cooking Intelligence** column (Newton’s‑law ETA, carryover, juiciness, cook phase), plus
+mode‑aware **Fridge / cold‑chain**, **Fermenting / proofing** and **Chocolate tempering** views, an
+optional **AI cook assistant** and **Sonos announcements** — is fully documented here:
+
+### 📖 [**Docs/DASHBOARD.md**](Docs/DASHBOARD.md) · 🤖 [**Docs/AUTOMATIONS.md**](Docs/AUTOMATIONS.md)
+
+Everything it needs ships in [`examples/`](examples/): the dashboard
+([`dashboard_full.yaml`](examples/dashboard_full.yaml)), the derived template sensors
+([`cooking_physics_package.yaml`](examples/cooking_physics_package.yaml)), the 27 automations
+([`chefiq_automations.yaml`](examples/chefiq_automations.yaml)), the scripts
+([`chefiq_scripts.yaml`](examples/chefiq_scripts.yaml)) and the AI / Sonos add‑ons.
+
+| Cooking overview | Food safety & cooking intelligence |
+|---|---|
+| [![Cooking overview](Docs/screenshots/dashboard-1-cooking-overview.png)](Docs/screenshots/dashboard-1-cooking-overview.png) | [![Food safety and cooking intelligence](Docs/screenshots/dashboard-2-food-safety-intelligence.png)](Docs/screenshots/dashboard-2-food-safety-intelligence.png) |
+| **Fridge / cold‑chain mode** | **Fermenting / proofing mode** |
+| [![Fridge cold-chain mode](Docs/screenshots/dashboard-3-fridge-cold-chain.png)](Docs/screenshots/dashboard-3-fridge-cold-chain.png) | [![Fermenting proofing mode](Docs/screenshots/dashboard-4-fermenting-proofing.png)](Docs/screenshots/dashboard-4-fermenting-proofing.png) |
 
 ## Compatibility
 
