@@ -47,15 +47,15 @@ Copy `custom_components/chefiq_ble/` into your HA `config/custom_components/` di
 
 ## Why not just use BLE Monitor?
 
-BLE Monitor is brilliant, but its bundled Chef iQ parser:
+BLE Monitor is brilliant, but historically its bundled Chef iQ parser:
 
-* surfaces probe rings that aren't in contact as `~3,276 °C`,
+* surfaced probe rings that aren't in contact as `~3,276 °C` (now fixed upstream — see the note below),
 * doesn't scale battery from raw byte to percentage,
 * and on Home Assistant OS only supports the **local** HCI adapter — it can't ingest from an SLZB‑06 or any other remote scanner that HA's first‑party Bluetooth integration knows about.
 
 This integration is an end run around all three of those — it sits directly on `homeassistant.components.bluetooth`, so any source that integration sees, this one sees too.
 
-(There is a [companion PR open against BLE Monitor](https://github.com/custom-components/ble_monitor/pull/1538) that fixes the sentinel issue there too, for users who prefer to stay on BLE Monitor.)
+(The sentinel fix has since been merged into BLE Monitor via [PR #1538](https://github.com/custom-components/ble_monitor/pull/1538), so recent BLE Monitor versions no longer show the `~3,276 °C` readings — handy if you prefer to stay on BLE Monitor.)
 
 ## Multiple probes
 
